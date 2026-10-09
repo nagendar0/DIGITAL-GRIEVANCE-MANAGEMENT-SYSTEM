@@ -721,12 +721,46 @@ function AuthPortal() {
                         </button>
                       </div>
                     )}
+                    {emailCheck.status === "DIFFERENT_ROLE" && (
+                      <div className="p-2.5 rounded-lg bg-orange-50 border border-orange-200 text-orange-950 text-xs space-y-1.5 animate-in fade-in">
+                        <div className="flex items-center gap-1.5">
+                          <AlertCircle className="w-3.5 h-3.5 text-orange-600 shrink-0" />
+                          <span>{emailCheck.message}</span>
+                        </div>
+                        {emailCheck.actualRole && (
+                          <button
+                            type="button"
+                            id="btn-switch-role-from-check"
+                            onClick={() => {
+                              const targetRole: RoleCategory =
+                                emailCheck.actualRole === "WORKER"
+                                  ? "WORKER"
+                                  : emailCheck.actualRole === "ORG_MEMBER" ||
+                                    emailCheck.actualRole === "PLATFORM_ADMIN"
+                                  ? "ORGANIZATION"
+                                  : "CITIZEN";
+                              handleRoleChange(targetRole);
+                              handleModeChange("SIGN_IN");
+                            }}
+                            className="inline-flex items-center gap-1 font-semibold text-orange-800 hover:underline pl-5 cursor-pointer text-[11px]"
+                          >
+                            Switch to{" "}
+                            {emailCheck.actualRole === "WORKER"
+                              ? "Field Worker"
+                              : emailCheck.actualRole === "ORG_MEMBER" ||
+                                emailCheck.actualRole === "PLATFORM_ADMIN"
+                              ? "Organization"
+                              : "Citizen"}{" "}
+                            Sign In →
+                          </button>
+                        )}
+                      </div>
+                    )}
                     {(emailCheck.status === "ALREADY_REGISTERED" ||
-                      emailCheck.status === "DIFFERENT_ROLE" ||
                       emailCheck.status === "AVAILABLE") && (
                       <div className="flex items-center gap-1.5 text-[11px] text-emerald-700 pl-1 font-medium animate-in fade-in">
                         <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                        <span>Registered account found. Enter password to sign in as {roleConfig.name}.</span>
+                        <span>{emailCheck.message || `Registered account found. Enter password to sign in as ${roleConfig.name}.`}</span>
                       </div>
                     )}
                   </div>

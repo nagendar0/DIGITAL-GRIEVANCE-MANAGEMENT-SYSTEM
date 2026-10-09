@@ -137,8 +137,39 @@ export async function checkEmailDomainStatus(
     actualRole = "ORG_MEMBER";
   }
 
+  const isWorker = actualRole === "WORKER";
+  const isOrgMember = actualRole === "ORG_MEMBER";
+  const isPlatformAdmin = actualRole === "PLATFORM_ADMIN";
+
   if (domain === "CITIZEN") {
-    // Every registered user in ResolveAI has citizen privileges
+    // Only check Citizen table (profiles with CITIZEN role, excluding dedicated worker or organization accounts)
+    if (isWorker || isOrgMember) {
+      if (mode === "SIGN_IN") {
+        return {
+          email: cleanEmail,
+          exists: true,
+          registeredInDomain: false,
+          actualRole,
+          domainName,
+          status: "DIFFERENT_ROLE",
+          message: `This email is registered in the ${
+            isWorker ? "Field Worker" : "Organization"
+          } table, not Citizen. Please switch to ${
+            isWorker ? "Field Worker" : "Organization"
+          } Sign In.`,
+        };
+      }
+      return {
+        email: cleanEmail,
+        exists: true,
+        registeredInDomain: false,
+        actualRole,
+        domainName,
+        status: "ALREADY_REGISTERED",
+        message: "Already registered. An account with this email is already registered. Please go to sign in.",
+      };
+    }
+
     if (mode === "SIGN_IN") {
       return {
         email: cleanEmail,
@@ -163,6 +194,35 @@ export async function checkEmailDomainStatus(
   }
 
   if (domain === "ORGANIZATION") {
+    // Only check Organization tables (organizations and organization_members)
+    if (!isOrgMember && !isPlatformAdmin) {
+      if (mode === "SIGN_IN") {
+        return {
+          email: cleanEmail,
+          exists: true,
+          registeredInDomain: false,
+          actualRole,
+          domainName,
+          status: "DIFFERENT_ROLE",
+          message: `This email is registered in the ${
+            isWorker ? "Field Worker" : "Citizen"
+          } table, not Organization. Please switch to ${
+            isWorker ? "Field Worker" : "Citizen"
+          } Sign In.`,
+        };
+      }
+      return {
+        email: cleanEmail,
+        exists: true,
+        registeredInDomain: false,
+        actualRole,
+        domainName,
+        status: "ALREADY_REGISTERED",
+        message:
+          "Already registered. An account with this email is already registered. Please go to sign in.",
+      };
+    }
+
     if (mode === "SIGN_IN") {
       return {
         email: cleanEmail,
@@ -171,7 +231,7 @@ export async function checkEmailDomainStatus(
         actualRole,
         domainName,
         status: "ALREADY_REGISTERED",
-        message: "Organization account found. Enter your password to sign in.",
+        message: "Organization account found in organization registry. Enter your password to sign in.",
       };
     }
     // In SIGN_UP mode:
@@ -183,11 +243,40 @@ export async function checkEmailDomainStatus(
       domainName,
       status: "ALREADY_REGISTERED",
       message:
-        "Already registered. An account with this email is already registered. Please go to sign in.",
+        "Already registered. An organization account with this email is already registered. Please go to sign in.",
     };
   }
 
   // domain === "WORKER"
+  // Only check Worker table (workers)
+  if (!isWorker && !isPlatformAdmin) {
+    if (mode === "SIGN_IN") {
+      return {
+        email: cleanEmail,
+        exists: true,
+        registeredInDomain: false,
+        actualRole,
+        domainName,
+        status: "DIFFERENT_ROLE",
+        message: `This email is registered in the ${
+          isOrgMember ? "Organization" : "Citizen"
+        } table, not Field Worker. Please switch to ${
+          isOrgMember ? "Organization" : "Citizen"
+        } Sign In.`,
+      };
+    }
+    return {
+      email: cleanEmail,
+      exists: true,
+      registeredInDomain: false,
+      actualRole,
+      domainName,
+      status: "ALREADY_REGISTERED",
+      message:
+        "Already registered. An account with this email is already registered. Please go to sign in.",
+    };
+  }
+
   if (mode === "SIGN_IN") {
     return {
       email: cleanEmail,
@@ -196,7 +285,7 @@ export async function checkEmailDomainStatus(
       actualRole,
       domainName,
       status: "ALREADY_REGISTERED",
-      message: "Field Worker account found. Enter your password to sign in.",
+      message: "Field Worker account found in worker registry. Enter your password to sign in.",
     };
   }
   // In SIGN_UP mode:
@@ -208,7 +297,7 @@ export async function checkEmailDomainStatus(
     domainName,
     status: "ALREADY_REGISTERED",
     message:
-      "Already registered. An account with this email is already registered. Please go to sign in.",
+      "Already registered. A field worker account with this email is already registered. Please go to sign in.",
   };
 }
 
@@ -285,139 +374,84 @@ export async function signIn(prevState: any, formData: FormData) {
     "User";
   const resolvedPhone = data.user.user_metadata?.phone || profile?.phone || null;
 
+  // 4. Check organizations official_email
+  const { data: orgWithOfficialEmail } = await adminClient
+    .from("organizations")
+    .select("id")
+    .ilike("official_email", cleanEmail)
+    .maybeSingle();
+
   let role: string = "CITIZEN";
 
   if (intendedRole === "ORGANIZATION") {
     if (isPlatformAdmin) {
       role = "PLATFORM_ADMIN";
     } else {
-      role = "ORG_MEMBER";
-      // Ensure profile exists in profiles table
-      if (!profile) {
-        await adminClient.from("profiles").insert({
-          id: data.user.id,
-          full_name: resolvedFullName,
-          phone: resolvedPhone,
-          role: "ORG_MEMBER",
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        });
+      // Check ONLY organization table: organization_members or organizations table
+      if (!member && !orgWithOfficialEmail) {
+        await supabase.auth.signOut();
+        if (worker) {
+          return {
+            error: "Access denied. This email is registered in the workers table. Please sign in via the Field Worker portal.",
+          };
+        }
+        return {
+          error: "Access denied. No organization account found in the organization table for this email. Please register your organization first or sign in via the Citizen portal.",
+        };
       }
 
-      // Check organization database table (organization_members)
-      if (!member) {
-        // Not found in organization_members: create account in organization_members!
-        const { data: matchedOrg } = await adminClient
-          .from("organizations")
-          .select("id")
-          .ilike("official_email", cleanEmail)
-          .maybeSingle();
-
-        let targetOrgId = matchedOrg?.id;
-
-        if (!targetOrgId) {
-          const { data: defaultOrg } = await adminClient
-            .from("organizations")
-            .select("id")
-            .limit(1)
-            .maybeSingle();
-
-          if (defaultOrg) {
-            targetOrgId = defaultOrg.id;
-          } else {
-            const { data: newOrg } = await adminClient
-              .from("organizations")
-              .insert({
-                name: "Municipal Works & Civic Services",
-                type: "MUNICIPALITY",
-                registration_number: `GOV-${Date.now().toString().slice(-6)}`,
-                official_email: cleanEmail,
-                official_phone: resolvedPhone || "+91 98765 00000",
-                address: "Civic Centre, Municipal Complex",
-                verification_doc_url: "https://resolveai.gov.in/docs/municipal_charter.pdf",
-                status: "VERIFIED",
-              })
-              .select("id")
-              .single();
-            targetOrgId = newOrg?.id;
-          }
-        }
-
-        if (targetOrgId) {
-          await adminClient.from("organization_members").upsert(
-            {
-              organization_id: targetOrgId,
-              user_id: data.user.id,
-              is_admin: true,
-            },
-            { onConflict: "organization_id,user_id" }
-          );
-        }
+      role = "ORG_MEMBER";
+      if (!member && orgWithOfficialEmail) {
+        await adminClient.from("organization_members").upsert(
+          {
+            organization_id: orgWithOfficialEmail.id,
+            user_id: data.user.id,
+            is_admin: true,
+          },
+          { onConflict: "organization_id,user_id" }
+        );
       }
     }
   } else if (intendedRole === "WORKER") {
     if (isPlatformAdmin) {
       role = "PLATFORM_ADMIN";
     } else {
-      role = "WORKER";
-      // Ensure profile exists in profiles table
-      if (!profile) {
-        await adminClient.from("profiles").insert({
-          id: data.user.id,
-          full_name: resolvedFullName,
-          phone: resolvedPhone,
-          role: "WORKER",
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        });
-      }
-
-      // Check worker database table (workers)
+      // Check ONLY worker table: workers table
       if (!worker) {
-        // Not found in workers table: create account in workers table!
-        const { data: defaultOrg } = await adminClient
-          .from("organizations")
-          .select("id")
-          .limit(1)
-          .maybeSingle();
-
-        let targetOrgId = defaultOrg?.id;
-        if (!targetOrgId) {
-          const { data: newOrg } = await adminClient
-            .from("organizations")
-            .insert({
-              name: "Municipal Works & Civic Services",
-              type: "MUNICIPALITY",
-              registration_number: `GOV-${Date.now().toString().slice(-6)}`,
-              official_email: "support@resolveai.gov.in",
-              official_phone: "+91 98765 00000",
-              address: "Civic Centre, Municipal Complex",
-              verification_doc_url: "https://resolveai.gov.in/docs/municipal_charter.pdf",
-              status: "VERIFIED",
-            })
-            .select("id")
-            .single();
-          targetOrgId = newOrg?.id;
+        await supabase.auth.signOut();
+        if (member || orgWithOfficialEmail) {
+          return {
+            error: "Access denied. This email is registered in the organization table. Please sign in via the Organization portal.",
+          };
         }
-
-        await adminClient.from("workers").insert({
-          user_id: data.user.id,
-          organization_id: targetOrgId,
-          skills: ["General Municipal Maintenance", "Civic Repairs"],
-          is_active: true,
-          current_active_jobs: 0,
-        });
+        return {
+          error: "Access denied. No field technician account found in the workers table for this email. Please register as a field technician first or sign in via the Citizen portal.",
+        };
       }
+
+      role = "WORKER";
     }
   } else {
     // Intended role is CITIZEN (or default)
     if (isPlatformAdmin) {
       role = "PLATFORM_ADMIN";
     } else {
+      // Check ONLY citizen table: block cross-domain worker or organization accounts
+      if (worker) {
+        await supabase.auth.signOut();
+        return {
+          error: "This email is registered in the workers table. Please sign in via the Field Worker portal.",
+        };
+      }
+      if (member || orgWithOfficialEmail) {
+        await supabase.auth.signOut();
+        return {
+          error: "This email is registered in the organization table. Please sign in via the Organization portal.",
+        };
+      }
+
       role = "CITIZEN";
-      // Check citizen database table (profiles)
       if (!profile) {
-        // Not found in profiles: create account in profiles table!
         await adminClient.from("profiles").insert({
           id: data.user.id,
           full_name: resolvedFullName,

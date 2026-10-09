@@ -31,10 +31,11 @@ vi.mock("@/lib/supabase/server", () => ({
   createClient: vi.fn(),
 }));
 
-import { checkEmailDomainStatus, resetPassword } from "@/server/actions/auth";
+import { checkEmailDomainStatus, resetPassword, signIn } from "@/server/actions/auth";
 import { sendPasswordResetOtp } from "@/server/actions/otp";
 import { signVerifiedEmail } from "@/lib/email/otp-crypto";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { createClient } from "@/lib/supabase/server";
 
 describe("checkEmailDomainStatus Category & Sector Enrollment Isolation", () => {
   beforeEach(() => {
@@ -91,7 +92,7 @@ describe("checkEmailDomainStatus Category & Sector Enrollment Isolation", () => 
     expect(res.message).toBe("Email available for new Citizen registration.");
   });
 
-  it("detects registered Citizen email on Organization portal Sign In as ALREADY_REGISTERED for multi-role sign-in", async () => {
+  it("detects registered Citizen email on Organization portal Sign In as DIFFERENT_ROLE", async () => {
     const mockFrom = vi.fn((table: string) => {
       if (table === "organizations") {
         return {
@@ -126,8 +127,10 @@ describe("checkEmailDomainStatus Category & Sector Enrollment Isolation", () => 
     } as any);
 
     const res = await checkEmailDomainStatus("citizen@test.com", "ORGANIZATION", "SIGN_IN");
-    expect(res.status).toBe("ALREADY_REGISTERED");
-    expect(res.message).toBe("Organization account found. Enter your password to sign in.");
+    expect(res.status).toBe("DIFFERENT_ROLE");
+    expect(res.registeredInDomain).toBe(false);
+    expect(res.actualRole).toBe("CITIZEN");
+    expect(res.message).toBe("This email is registered in the Citizen table, not Organization. Please switch to Citizen Sign In.");
   });
 
   it("marks registered email on Organization portal Sign Up as ALREADY_REGISTERED", async () => {
@@ -170,7 +173,7 @@ describe("checkEmailDomainStatus Category & Sector Enrollment Isolation", () => 
     expect(res.message).toContain("Please go to sign in");
   });
 
-  it("detects registered Citizen email on Field Worker portal Sign In as ALREADY_REGISTERED for multi-role sign-in", async () => {
+  it("detects registered Citizen email on Field Worker portal Sign In as DIFFERENT_ROLE", async () => {
     const mockFrom = vi.fn((table: string) => {
       if (table === "organizations") {
         return {
@@ -205,8 +208,10 @@ describe("checkEmailDomainStatus Category & Sector Enrollment Isolation", () => 
     } as any);
 
     const res = await checkEmailDomainStatus("citizen@test.com", "WORKER", "SIGN_IN");
-    expect(res.status).toBe("ALREADY_REGISTERED");
-    expect(res.message).toBe("Field Worker account found. Enter your password to sign in.");
+    expect(res.status).toBe("DIFFERENT_ROLE");
+    expect(res.registeredInDomain).toBe(false);
+    expect(res.actualRole).toBe("CITIZEN");
+    expect(res.message).toBe("This email is registered in the Citizen table, not Field Worker. Please switch to Citizen Sign In.");
   });
 
   it("detects registered Worker on Field Worker Sign In as ALREADY_REGISTERED", async () => {
@@ -254,7 +259,105 @@ describe("checkEmailDomainStatus Category & Sector Enrollment Isolation", () => 
 
     const res = await checkEmailDomainStatus("worker@test.com", "WORKER", "SIGN_IN");
     expect(res.status).toBe("ALREADY_REGISTERED");
-    expect(res.message).toBe("Field Worker account found. Enter your password to sign in.");
+    expect(res.message).toBe("Field Worker account found in worker registry. Enter your password to sign in.");
+  });
+
+  it("detects registered Organization member on Organization Sign In as ALREADY_REGISTERED", async () => {
+    const mockFrom = vi.fn((table: string) => {
+      if (table === "organization_members") {
+        return {
+          select: vi.fn().mockReturnValue({
+            eq: vi.fn().mockReturnValue({
+              maybeSingle: vi.fn().mockResolvedValue({ data: { id: "mem-1" } }),
+            }),
+          }),
+        };
+      }
+      if (table === "organizations") {
+        return {
+          select: vi.fn().mockReturnValue({
+            ilike: vi.fn().mockReturnValue({
+              maybeSingle: vi.fn().mockResolvedValue({ data: null }),
+            }),
+          }),
+        };
+      }
+      return {
+        select: vi.fn().mockReturnValue({
+          eq: vi.fn().mockReturnValue({
+            maybeSingle: vi.fn().mockResolvedValue({ data: null }),
+          }),
+        }),
+      };
+    });
+    vi.mocked(createAdminClient).mockReturnValue({
+      auth: {
+        admin: {
+          listUsers: vi.fn().mockResolvedValue({
+            data: {
+              users: [
+                { id: "u-org", email: "orgadmin@gov.in", user_metadata: { role: "ORG_MEMBER" } },
+              ],
+            },
+          }),
+        },
+      },
+      from: mockFrom,
+    } as any);
+
+    const res = await checkEmailDomainStatus("orgadmin@gov.in", "ORGANIZATION", "SIGN_IN");
+    expect(res.status).toBe("ALREADY_REGISTERED");
+    expect(res.message).toBe("Organization account found in organization registry. Enter your password to sign in.");
+  });
+
+  it("detects registered Worker on Citizen Sign In as DIFFERENT_ROLE", async () => {
+    const mockFrom = vi.fn((table: string) => {
+      if (table === "workers") {
+        return {
+          select: vi.fn().mockReturnValue({
+            eq: vi.fn().mockReturnValue({
+              maybeSingle: vi.fn().mockResolvedValue({ data: { id: "w-1" } }),
+            }),
+          }),
+        };
+      }
+      if (table === "organizations") {
+        return {
+          select: vi.fn().mockReturnValue({
+            ilike: vi.fn().mockReturnValue({
+              maybeSingle: vi.fn().mockResolvedValue({ data: null }),
+            }),
+          }),
+        };
+      }
+      return {
+        select: vi.fn().mockReturnValue({
+          eq: vi.fn().mockReturnValue({
+            maybeSingle: vi.fn().mockResolvedValue({ data: null }),
+          }),
+        }),
+      };
+    });
+    vi.mocked(createAdminClient).mockReturnValue({
+      auth: {
+        admin: {
+          listUsers: vi.fn().mockResolvedValue({
+            data: {
+              users: [
+                { id: "u-worker", email: "worker@test.com", user_metadata: { role: "WORKER" } },
+              ],
+            },
+          }),
+        },
+      },
+      from: mockFrom,
+    } as any);
+
+    const res = await checkEmailDomainStatus("worker@test.com", "CITIZEN", "SIGN_IN");
+    expect(res.status).toBe("DIFFERENT_ROLE");
+    expect(res.registeredInDomain).toBe(false);
+    expect(res.actualRole).toBe("WORKER");
+    expect(res.message).toBe("This email is registered in the Field Worker table, not Citizen. Please switch to Field Worker Sign In.");
   });
 
   it("sendOtp blocks an existing registered user from receiving Field Worker registration OTP", async () => {
@@ -649,6 +752,178 @@ describe("checkEmailDomainStatus Category & Sector Enrollment Isolation", () => 
         password: "BrandNewSecurePassword123!",
       });
       expect(mockDelete).toHaveBeenCalled();
+    });
+  });
+
+  describe("signIn Portal Table Isolation", () => {
+    it("denies Organization sign-in for user not in organization table", async () => {
+      const mockSignOut = vi.fn().mockResolvedValue({});
+      vi.mocked(createClient).mockResolvedValue({
+        auth: {
+          signInWithPassword: vi.fn().mockResolvedValue({
+            data: { user: { id: "u-citizen", user_metadata: { full_name: "Citizen User" } } },
+            error: null,
+          }),
+          signOut: mockSignOut,
+        },
+      } as any);
+
+      vi.mocked(createAdminClient).mockReturnValue({
+        from: vi.fn(() => ({
+          select: vi.fn().mockReturnValue({
+            eq: vi.fn().mockReturnValue({
+              maybeSingle: vi.fn().mockResolvedValue({ data: null }),
+            }),
+            ilike: vi.fn().mockReturnValue({
+              maybeSingle: vi.fn().mockResolvedValue({ data: null }),
+            }),
+          }),
+        })),
+      } as any);
+
+      const formData = new FormData();
+      formData.append("email", "citizen@test.com");
+      formData.append("password", "Password123!");
+      formData.append("intendedRole", "ORGANIZATION");
+
+      const res = await signIn(null, formData);
+      expect(mockSignOut).toHaveBeenCalled();
+      expect(res?.error).toBe(
+        "Access denied. No organization account found in the organization table for this email. Please register your organization first or sign in via the Citizen portal."
+      );
+    });
+
+    it("denies Worker sign-in for user not in workers table", async () => {
+      const mockSignOut = vi.fn().mockResolvedValue({});
+      vi.mocked(createClient).mockResolvedValue({
+        auth: {
+          signInWithPassword: vi.fn().mockResolvedValue({
+            data: { user: { id: "u-citizen", user_metadata: { full_name: "Citizen User" } } },
+            error: null,
+          }),
+          signOut: mockSignOut,
+        },
+      } as any);
+
+      vi.mocked(createAdminClient).mockReturnValue({
+        from: vi.fn(() => ({
+          select: vi.fn().mockReturnValue({
+            eq: vi.fn().mockReturnValue({
+              maybeSingle: vi.fn().mockResolvedValue({ data: null }),
+            }),
+            ilike: vi.fn().mockReturnValue({
+              maybeSingle: vi.fn().mockResolvedValue({ data: null }),
+            }),
+          }),
+        })),
+      } as any);
+
+      const formData = new FormData();
+      formData.append("email", "citizen@test.com");
+      formData.append("password", "Password123!");
+      formData.append("intendedRole", "WORKER");
+
+      const res = await signIn(null, formData);
+      expect(mockSignOut).toHaveBeenCalled();
+      expect(res?.error).toBe(
+        "Access denied. No field technician account found in the workers table for this email. Please register as a field technician first or sign in via the Citizen portal."
+      );
+    });
+
+    it("denies Citizen sign-in for user who is registered in workers table", async () => {
+      const mockSignOut = vi.fn().mockResolvedValue({});
+      vi.mocked(createClient).mockResolvedValue({
+        auth: {
+          signInWithPassword: vi.fn().mockResolvedValue({
+            data: { user: { id: "u-worker", user_metadata: { full_name: "Worker User" } } },
+            error: null,
+          }),
+          signOut: mockSignOut,
+        },
+      } as any);
+
+      vi.mocked(createAdminClient).mockReturnValue({
+        from: vi.fn((table: string) => {
+          if (table === "workers") {
+            return {
+              select: vi.fn().mockReturnValue({
+                eq: vi.fn().mockReturnValue({
+                  maybeSingle: vi.fn().mockResolvedValue({ data: { id: "w-1" } }),
+                }),
+              }),
+            };
+          }
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                maybeSingle: vi.fn().mockResolvedValue({ data: null }),
+              }),
+              ilike: vi.fn().mockReturnValue({
+                maybeSingle: vi.fn().mockResolvedValue({ data: null }),
+              }),
+            }),
+          };
+        }),
+      } as any);
+
+      const formData = new FormData();
+      formData.append("email", "worker@test.com");
+      formData.append("password", "Password123!");
+      formData.append("intendedRole", "CITIZEN");
+
+      const res = await signIn(null, formData);
+      expect(mockSignOut).toHaveBeenCalled();
+      expect(res?.error).toBe(
+        "This email is registered in the workers table. Please sign in via the Field Worker portal."
+      );
+    });
+
+    it("denies Citizen sign-in for user who is registered in organization table", async () => {
+      const mockSignOut = vi.fn().mockResolvedValue({});
+      vi.mocked(createClient).mockResolvedValue({
+        auth: {
+          signInWithPassword: vi.fn().mockResolvedValue({
+            data: { user: { id: "u-org", user_metadata: { full_name: "Org User" } } },
+            error: null,
+          }),
+          signOut: mockSignOut,
+        },
+      } as any);
+
+      vi.mocked(createAdminClient).mockReturnValue({
+        from: vi.fn((table: string) => {
+          if (table === "organization_members") {
+            return {
+              select: vi.fn().mockReturnValue({
+                eq: vi.fn().mockReturnValue({
+                  maybeSingle: vi.fn().mockResolvedValue({ data: { id: "mem-1" } }),
+                }),
+              }),
+            };
+          }
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                maybeSingle: vi.fn().mockResolvedValue({ data: null }),
+              }),
+              ilike: vi.fn().mockReturnValue({
+                maybeSingle: vi.fn().mockResolvedValue({ data: null }),
+              }),
+            }),
+          };
+        }),
+      } as any);
+
+      const formData = new FormData();
+      formData.append("email", "org@gov.in");
+      formData.append("password", "Password123!");
+      formData.append("intendedRole", "CITIZEN");
+
+      const res = await signIn(null, formData);
+      expect(mockSignOut).toHaveBeenCalled();
+      expect(res?.error).toBe(
+        "This email is registered in the organization table. Please sign in via the Organization portal."
+      );
     });
   });
 });
