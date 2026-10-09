@@ -202,3 +202,75 @@ export async function verifyOtp(
     };
   }
 }
+
+/**
+ * Server action to generate and dispatch an OTP for password reset
+ */
+export async function sendPasswordResetOtp(
+  email: string
+): Promise<{ success: boolean; message?: string; error?: string; notRegistered?: boolean }> {
+  const cleanEmail = (email || "").trim().toLowerCase();
+  if (!cleanEmail) {
+    return {
+      success: false,
+      error: "Please provide your email address to reset your password.",
+    };
+  }
+
+  const validation = emailSchema.safeParse(cleanEmail);
+  if (!validation.success) {
+    return { success: false, error: validation.error.errors[0].message };
+  }
+
+  try {
+    // 1. Check if an account is registered with this email
+    const existingUser = await getExistingAuthUserByEmail(cleanEmail);
+    if (!existingUser) {
+      return {
+        success: false,
+        notRegistered: true,
+        error: "No registered account found with this email address. Please create an account.",
+      };
+    }
+
+    const admin = createAdminClient();
+
+    // 2. Generate 6-digit numeric OTP
+    const otpCode = crypto.randomInt(100000, 999999).toString();
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString(); // 10 minutes
+
+    // 3. Upsert into email_verifications table
+    const { error: dbError } = await admin.from("email_verifications").upsert({
+      email: cleanEmail,
+      otp: otpCode,
+      expires_at: expiresAt,
+      attempts: 0,
+      verified_at: null,
+    });
+
+    if (dbError) {
+      console.error("Database error saving password reset OTP:", dbError);
+    }
+
+    // 4. Send email via SMTP
+    const mailResult = await sendOtpEmail(cleanEmail, otpCode, "Password Reset");
+    if (!mailResult.success) {
+      return {
+        success: false,
+        error: mailResult.error || "Failed to deliver OTP via SMTP. Please try again later.",
+      };
+    }
+
+    return {
+      success: true,
+      message: `Verification code sent to ${cleanEmail}. Please check your inbox or spam.`,
+    };
+  } catch (err: any) {
+    console.error("sendPasswordResetOtp error:", err);
+    return {
+      success: false,
+      error: err?.message || "An unexpected error occurred while sending verification code.",
+    };
+  }
+}
+

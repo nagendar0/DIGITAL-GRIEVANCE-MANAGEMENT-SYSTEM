@@ -827,3 +827,113 @@ export async function signOut() {
   await supabase.auth.signOut();
   redirect("/login");
 }
+
+const resetPasswordSchema = z.object({
+  email: z.string().email("Invalid email address"),
+  token: z.string().min(1, "Verification token is required"),
+  newPassword: z.string().min(6, "Password must be at least 6 characters"),
+  confirmPassword: z.string().min(6, "Confirm password must be at least 6 characters"),
+});
+
+export async function resetPassword(payload: {
+  email: string;
+  token: string;
+  newPassword: string;
+  confirmPassword: string;
+}): Promise<{
+  success: boolean;
+  message?: string;
+  error?: string;
+  suggestedRole?: "CITIZEN" | "ORGANIZATION" | "WORKER";
+}> {
+  const validated = resetPasswordSchema.safeParse(payload);
+  if (!validated.success) {
+    return { success: false, error: validated.error.errors[0].message };
+  }
+
+  const { email, token, newPassword, confirmPassword } = validated.data;
+  const cleanEmail = email.trim().toLowerCase();
+
+  if (newPassword !== confirmPassword) {
+    return { success: false, error: "New password and confirm password do not match." };
+  }
+
+  // 1. Verify cryptographic token signature
+  const isSignatureValid = verifyEmailSignature(token, cleanEmail);
+  if (!isSignatureValid) {
+    return {
+      success: false,
+      error: "Verification code expired or invalid. Please request a new verification code.",
+    };
+  }
+
+  try {
+    // 2. Check if user exists
+    const existingUser = await getExistingAuthUserByEmail(cleanEmail);
+    if (!existingUser) {
+      return {
+        success: false,
+        error: "No registered account found with this email address.",
+      };
+    }
+
+    const adminClient = createAdminClient();
+
+    // 3. Update the user password in Supabase Auth
+    const { error: updateError } = await adminClient.auth.admin.updateUserById(
+      existingUser.id,
+      {
+        password: newPassword,
+      }
+    );
+
+    if (updateError) {
+      console.error("Error updating user password:", updateError);
+      return {
+        success: false,
+        error: updateError.message || "Failed to update password. Please try again.",
+      };
+    }
+
+    // 4. Invalidate the verification record so OTP cannot be reused
+    await adminClient
+      .from("email_verifications")
+      .delete()
+      .eq("email", cleanEmail);
+
+    // 5. Determine suggestedRole to redirect user to their matching portal
+    let suggestedRole: "CITIZEN" | "ORGANIZATION" | "WORKER" = "CITIZEN";
+    const { data: profile } = await adminClient
+      .from("profiles")
+      .select("role")
+      .eq("id", existingUser.id)
+      .maybeSingle();
+
+    if (
+      profile?.role === "ORG_MEMBER" ||
+      profile?.role === "PLATFORM_ADMIN" ||
+      existingUser.user_metadata?.role === "ORG_MEMBER" ||
+      existingUser.user_metadata?.role === "PLATFORM_ADMIN"
+    ) {
+      suggestedRole = "ORGANIZATION";
+    } else if (
+      profile?.role === "WORKER" ||
+      existingUser.user_metadata?.role === "WORKER"
+    ) {
+      suggestedRole = "WORKER";
+    }
+
+    return {
+      success: true,
+      message: "Password reset successfully! Please sign in with your new password.",
+      suggestedRole,
+    };
+  } catch (err: any) {
+    console.error("resetPassword error:", err);
+    return {
+      success: false,
+      error: err?.message || "An unexpected error occurred while resetting password.",
+    };
+  }
+}
+

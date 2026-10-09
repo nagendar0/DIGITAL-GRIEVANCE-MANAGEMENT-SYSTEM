@@ -31,7 +31,9 @@ vi.mock("@/lib/supabase/server", () => ({
   createClient: vi.fn(),
 }));
 
-import { checkEmailDomainStatus } from "@/server/actions/auth";
+import { checkEmailDomainStatus, resetPassword } from "@/server/actions/auth";
+import { sendPasswordResetOtp } from "@/server/actions/otp";
+import { signVerifiedEmail } from "@/lib/email/otp-crypto";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 describe("checkEmailDomainStatus Category & Sector Enrollment Isolation", () => {
@@ -528,5 +530,127 @@ describe("checkEmailDomainStatus Category & Sector Enrollment Isolation", () => 
       "Already registered. An account with this email address is already registered. Please go to sign in."
     );
   });
+
+  describe("Password Reset / Forward Password Flow", () => {
+    it("sendPasswordResetOtp requires an email address", async () => {
+      const res = await sendPasswordResetOtp("");
+      expect(res.success).toBe(false);
+      expect(res.error).toContain("Please provide your email address");
+    });
+
+    it("sendPasswordResetOtp checks registration and reports notRegistered if email not found", async () => {
+      vi.mocked(createAdminClient).mockReturnValue({
+        auth: {
+          admin: {
+            listUsers: vi.fn().mockResolvedValue({ data: { users: [] } }),
+          },
+        },
+      } as any);
+
+      const res = await sendPasswordResetOtp("unregistered@test.com");
+      expect(res.success).toBe(false);
+      expect(res.notRegistered).toBe(true);
+      expect(res.error).toBe("No registered account found with this email address. Please create an account.");
+    });
+
+    it("sendPasswordResetOtp sends OTP if account is registered", async () => {
+      const mockUpsert = vi.fn().mockResolvedValue({ error: null });
+      vi.mocked(createAdminClient).mockReturnValue({
+        auth: {
+          admin: {
+            listUsers: vi.fn().mockResolvedValue({
+              data: {
+                users: [{ id: "user-123", email: "registered@test.com" }],
+              },
+            }),
+          },
+        },
+        from: vi.fn().mockReturnValue({
+          upsert: mockUpsert,
+        }),
+      } as any);
+
+      const res = await sendPasswordResetOtp("registered@test.com");
+      expect(res.success).toBe(true);
+      expect(res.message).toContain("Verification code sent to registered@test.com");
+      expect(mockUpsert).toHaveBeenCalled();
+    });
+
+    it("resetPassword rejects mismatched new password and confirmation", async () => {
+      const res = await resetPassword({
+        email: "test@example.com",
+        token: "dummy:token",
+        newPassword: "Password123!",
+        confirmPassword: "DifferentPassword123!",
+      });
+
+      expect(res.success).toBe(false);
+      expect(res.error).toBe("New password and confirm password do not match.");
+    });
+
+    it("resetPassword rejects invalid or tampered token signature", async () => {
+      const res = await resetPassword({
+        email: "test@example.com",
+        token: "invalid:token:signature",
+        newPassword: "Password123!",
+        confirmPassword: "Password123!",
+      });
+
+      expect(res.success).toBe(false);
+      expect(res.error).toContain("Verification code expired or invalid");
+    });
+
+    it("resetPassword successfully updates user password and clears verification record", async () => {
+      const email = "verified.user@resolveai.in";
+      const validToken = signVerifiedEmail(email);
+
+      const mockUpdateUserById = vi.fn().mockResolvedValue({ error: null });
+      const mockDelete = vi.fn().mockReturnValue({
+        eq: vi.fn().mockResolvedValue({ error: null }),
+      });
+      const mockSelectProfile = vi.fn().mockReturnValue({
+        eq: vi.fn().mockReturnValue({
+          maybeSingle: vi.fn().mockResolvedValue({ data: { role: "CITIZEN" } }),
+        }),
+      });
+
+      vi.mocked(createAdminClient).mockReturnValue({
+        auth: {
+          admin: {
+            listUsers: vi.fn().mockResolvedValue({
+              data: {
+                users: [{ id: "target-user-id", email }],
+              },
+            }),
+            updateUserById: mockUpdateUserById,
+          },
+        },
+        from: vi.fn((table: string) => {
+          if (table === "email_verifications") {
+            return { delete: mockDelete };
+          }
+          if (table === "profiles") {
+            return { select: mockSelectProfile };
+          }
+          return {};
+        }),
+      } as any);
+
+      const res = await resetPassword({
+        email,
+        token: validToken,
+        newPassword: "BrandNewSecurePassword123!",
+        confirmPassword: "BrandNewSecurePassword123!",
+      });
+
+      expect(res.success).toBe(true);
+      expect(res.message).toContain("Password reset successfully! Please sign in with your new password.");
+      expect(mockUpdateUserById).toHaveBeenCalledWith("target-user-id", {
+        password: "BrandNewSecurePassword123!",
+      });
+      expect(mockDelete).toHaveBeenCalled();
+    });
+  });
 });
+
 

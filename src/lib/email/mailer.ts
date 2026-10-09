@@ -38,23 +38,16 @@ export async function sendOtpEmail(
 
     const transporter = createMailerTransport();
 
+    const isPasswordReset = roleContext.toLowerCase().includes("password reset");
     // Natural, standard transactional subject line (matches Google, GitHub, Supabase OTPs)
-    const subject = `${otpCode} is your ResolveAI verification code`;
+    const subject = isPasswordReset
+      ? `${otpCode} is your ResolveAI password reset code`
+      : `${otpCode} is your ResolveAI verification code`;
 
     // Clean plain text version (essential for spam filter score)
-    const text = `Hi,
-
-Your ResolveAI verification code is:
-
-${otpCode}
-
-This code will expire in 10 minutes. Please enter it to complete your ${roleContext} registration.
-
-If you did not request this verification code, please ignore this email.
-
-Best regards,
-ResolveAI Team
-support@resolveai.org`;
+    const text = isPasswordReset
+      ? `Hi,\n\nYour ResolveAI password reset code is:\n\n${otpCode}\n\nThis code will expire in 10 minutes. Please enter it to reset your ResolveAI account password.\n\nIf you did not request a password reset, please ignore this email.\n\nBest regards,\nResolveAI Team\nsupport@resolveai.org`
+      : `Hi,\n\nYour ResolveAI verification code is:\n\n${otpCode}\n\nThis code will expire in 10 minutes. Please enter it to complete your ${roleContext} registration.\n\nIf you did not request this verification code, please ignore this email.\n\nBest regards,\nResolveAI Team\nsupport@resolveai.org`;
 
     // Clean, minimalist HTML with zero spam-trigger words and no external CSS classes
     const html = `<!DOCTYPE html>
@@ -62,7 +55,7 @@ support@resolveai.org`;
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Verification Code</title>
+  <title>${isPasswordReset ? "Password Reset Code" : "Verification Code"}</title>
 </head>
 <body style="margin: 0; padding: 24px 16px; background-color: #f9fafb; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #111827;">
   <div style="max-width: 480px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; border: 1px solid #e5e7eb; padding: 32px 24px;">
@@ -74,7 +67,11 @@ support@resolveai.org`;
     <p style="font-size: 15px; line-height: 1.5; color: #374151; margin: 0 0 16px 0;">Hi,</p>
 
     <p style="font-size: 15px; line-height: 1.5; color: #374151; margin: 0 0 24px 0;">
-      Use the following verification code to confirm your email address for your <strong>${roleContext}</strong> account:
+      ${
+        isPasswordReset
+          ? "Use the following verification code to reset the password for your ResolveAI account:"
+          : `Use the following verification code to confirm your email address for your <strong>${roleContext}</strong> account:`
+      }
     </p>
 
     <div style="background-color: #f3f4f6; border-radius: 8px; padding: 18px 24px; text-align: center; margin: 0 0 24px 0;">

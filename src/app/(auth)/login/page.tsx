@@ -13,6 +13,11 @@ import {
   Briefcase,
   CheckCircle2,
   Info,
+  KeyRound,
+  RotateCcw,
+  ArrowLeft,
+  Mail,
+  Lock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Textarea } from "@/components/ui/input";
@@ -31,11 +36,13 @@ import {
   registerOrganization,
   signUpWorker,
   checkEmailDomainStatus,
+  resetPassword,
   type EmailDomainCheckResult,
 } from "@/server/actions/auth";
+import { sendPasswordResetOtp, verifyOtp } from "@/server/actions/otp";
 
 type RoleCategory = "CITIZEN" | "ORGANIZATION" | "WORKER";
-type AuthMode = "SIGN_IN" | "SIGN_UP";
+type AuthMode = "SIGN_IN" | "SIGN_UP" | "FORGOT_PASSWORD";
 
 function AuthPortal() {
   const searchParams = useSearchParams();
@@ -74,6 +81,154 @@ function AuthPortal() {
   const [orgSignUpState, orgSignUpAction, isOrgPending] = useActionState(registerOrganization, null);
   const [workerSignUpState, workerSignUpAction, isWorkerPending] = useActionState(signUpWorker, null);
 
+  // Success message for Sign In (e.g. after password reset)
+  const [signInSuccessMessage, setSignInSuccessMessage] = useState<string | null>(null);
+
+  // Forgot password flow states
+  const [forgotStep, setForgotStep] = useState<1 | 2 | 3>(1);
+  const [forgotEmail, setForgotEmail] = useState("");
+  const [forgotOtp, setForgotOtp] = useState("");
+  const [forgotToken, setForgotToken] = useState("");
+  const [forgotNewPassword, setForgotNewPassword] = useState("");
+  const [forgotConfirmPassword, setForgotConfirmPassword] = useState("");
+  const [forgotError, setForgotError] = useState<string | null>(null);
+  const [forgotSuccess, setForgotSuccess] = useState<string | null>(null);
+  const [forgotNotRegistered, setForgotNotRegistered] = useState(false);
+  const [isSendingResetOtp, setIsSendingResetOtp] = useState(false);
+  const [isVerifyingResetOtp, setIsVerifyingResetOtp] = useState(false);
+  const [isResettingPassword, setIsResettingPassword] = useState(false);
+  const [resetOtpCooldown, setResetOtpCooldown] = useState(0);
+
+  // Countdown timer for reset OTP resend
+  useEffect(() => {
+    if (resetOtpCooldown <= 0) return;
+    const timer = setInterval(() => {
+      setResetOtpCooldown((prev) => prev - 1);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [resetOtpCooldown]);
+
+  const handleStartForgotPassword = () => {
+    clearAllErrors();
+    setSignInSuccessMessage(null);
+    setForgotEmail(email.trim());
+    setForgotOtp("");
+    setForgotToken("");
+    setForgotNewPassword("");
+    setForgotConfirmPassword("");
+    setForgotStep(1);
+    setForgotError(null);
+    setForgotSuccess(null);
+    setForgotNotRegistered(false);
+    setMode("FORGOT_PASSWORD");
+  };
+
+  const handleSendResetOtp = async () => {
+    const clean = forgotEmail.trim().toLowerCase();
+    if (!clean) {
+      setForgotError("Please provide your email address to reset your password.");
+      return;
+    }
+    if (!clean.includes("@") || !clean.includes(".")) {
+      setForgotError("Please enter a valid email address format.");
+      return;
+    }
+
+    setIsSendingResetOtp(true);
+    setForgotError(null);
+    setForgotNotRegistered(false);
+
+    try {
+      const res = await sendPasswordResetOtp(clean);
+      if (res.notRegistered) {
+        setForgotNotRegistered(true);
+        setForgotError(res.error || "No registered account found with this email address. Please create an account.");
+      } else if (!res.success) {
+        setForgotError(res.error || "Failed to send verification code. Please try again.");
+      } else {
+        setForgotSuccess(res.message || `Verification code sent to ${clean}. Please check your inbox or spam.`);
+        setForgotStep(2);
+        setResetOtpCooldown(60);
+      }
+    } catch (err: any) {
+      setForgotError(err?.message || "An unexpected error occurred while sending verification code.");
+    } finally {
+      setIsSendingResetOtp(false);
+    }
+  };
+
+  const handleVerifyResetOtp = async () => {
+    const cleanOtp = forgotOtp.trim();
+    if (!cleanOtp || cleanOtp.length !== 6) {
+      setForgotError("Please enter the complete 6-digit verification code.");
+      return;
+    }
+
+    setIsVerifyingResetOtp(true);
+    setForgotError(null);
+
+    try {
+      const res = await verifyOtp(forgotEmail.trim(), cleanOtp);
+      if (!res.success || !res.token) {
+        setForgotError(res.error || "Invalid verification code entered.");
+      } else {
+        setForgotToken(res.token);
+        setForgotStep(3);
+        setForgotSuccess("Email successfully verified! Enter your new password below.");
+      }
+    } catch (err: any) {
+      setForgotError(err?.message || "An unexpected error occurred during verification.");
+    } finally {
+      setIsVerifyingResetOtp(false);
+    }
+  };
+
+  const handleResetPasswordSubmit = async () => {
+    if (!forgotNewPassword || forgotNewPassword.length < 6) {
+      setForgotError("New password must be at least 6 characters.");
+      return;
+    }
+    if (forgotNewPassword !== forgotConfirmPassword) {
+      setForgotError("New password and confirmation password do not match.");
+      return;
+    }
+
+    setIsResettingPassword(true);
+    setForgotError(null);
+
+    try {
+      const res = await resetPassword({
+        email: forgotEmail.trim(),
+        token: forgotToken,
+        newPassword: forgotNewPassword,
+        confirmPassword: forgotConfirmPassword,
+      });
+
+      if (!res.success) {
+        setForgotError(res.error || "Failed to update password. Please try again.");
+      } else {
+        // Redirect back to sign in with pre-filled email and success message
+        setEmail(forgotEmail.trim());
+        if (res.suggestedRole) {
+          setRole(res.suggestedRole);
+        }
+        setSignInSuccessMessage(res.message || "Password reset successfully! Please sign in with your new password.");
+        setMode("SIGN_IN");
+        setForgotStep(1);
+        setForgotOtp("");
+        setForgotToken("");
+        setForgotNewPassword("");
+        setForgotConfirmPassword("");
+        setForgotError(null);
+        setForgotSuccess(null);
+      }
+    } catch (err: any) {
+      setForgotError(err?.message || "An unexpected error occurred while resetting password.");
+    } finally {
+      setIsResettingPassword(false);
+    }
+  };
+
   useEffect(() => {
     if (signInState?.error) {
       setDisplayedSignInError(signInState.error);
@@ -106,14 +261,21 @@ function AuthPortal() {
     setDisplayedOrgSignUpError(null);
     setDisplayedWorkerSignUpError(null);
     setEmailCheck(null);
+    setForgotError(null);
+    setForgotSuccess(null);
+    setForgotNotRegistered(false);
   };
 
   // Check email domain registration status when email, role, or mode changes
   const runEmailDomainCheck = async (
     emailToCheck: string,
     targetRole: RoleCategory,
-    targetMode: AuthMode = mode
+    targetMode: "SIGN_IN" | "SIGN_UP" = mode === "SIGN_UP" ? "SIGN_UP" : "SIGN_IN"
   ) => {
+    if (mode === "FORGOT_PASSWORD") {
+      setEmailCheck(null);
+      return;
+    }
     const clean = emailToCheck.trim();
     if (!clean || !clean.includes("@")) {
       setEmailCheck(null);
@@ -133,16 +295,16 @@ function AuthPortal() {
   const handleRoleChange = (newRole: RoleCategory) => {
     setRole(newRole);
     clearAllErrors();
-    if (email.trim()) {
-      runEmailDomainCheck(email.trim(), newRole, mode);
+    if (email.trim() && mode !== "FORGOT_PASSWORD") {
+      runEmailDomainCheck(email.trim(), newRole, mode === "SIGN_UP" ? "SIGN_UP" : "SIGN_IN");
     }
   };
 
   const handleModeChange = (newMode: AuthMode) => {
     setMode(newMode);
     clearAllErrors();
-    if (email.trim()) {
-      runEmailDomainCheck(email.trim(), role, newMode);
+    if (email.trim() && newMode !== "FORGOT_PASSWORD") {
+      runEmailDomainCheck(email.trim(), role, newMode === "SIGN_UP" ? "SIGN_UP" : "SIGN_IN");
     }
   };
 
@@ -154,13 +316,17 @@ function AuthPortal() {
 
   // Live debounced check as the user types
   useEffect(() => {
+    if (mode === "FORGOT_PASSWORD") {
+      setEmailCheck(null);
+      return;
+    }
     const clean = email.trim();
     if (!clean || !clean.includes("@") || clean.length < 5) {
       setEmailCheck(null);
       return;
     }
     const timer = setTimeout(() => {
-      runEmailDomainCheck(clean, role, mode);
+      runEmailDomainCheck(clean, role, mode === "SIGN_UP" ? "SIGN_UP" : "SIGN_IN");
     }, 400);
     return () => clearTimeout(timer);
   }, [email, role, mode]);
@@ -221,15 +387,23 @@ function AuthPortal() {
           <div
             className={cn(
               "mx-auto w-12 h-12 sm:w-14 sm:h-14 rounded-2xl flex items-center justify-center transition-all duration-200",
-              roleConfig.iconBgClass
+              mode === "FORGOT_PASSWORD"
+                ? "bg-amber-50 text-amber-600 border border-amber-100"
+                : roleConfig.iconBgClass
             )}
           >
-            <CurrentIcon className="w-6 h-6 sm:w-7 sm:h-7" />
+            {mode === "FORGOT_PASSWORD" ? (
+              <KeyRound className="w-6 h-6 sm:w-7 sm:h-7" />
+            ) : (
+              <CurrentIcon className="w-6 h-6 sm:w-7 sm:h-7" />
+            )}
           </div>
 
           <div>
             <CardTitle className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
-              {mode === "SIGN_IN"
+              {mode === "FORGOT_PASSWORD"
+                ? "Reset Password"
+                : mode === "SIGN_IN"
                 ? `${roleConfig.name} Portal Sign In`
                 : role === "CITIZEN"
                 ? "New Citizen Registration"
@@ -238,116 +412,173 @@ function AuthPortal() {
                 : "Field Worker Registration"}
             </CardTitle>
             <CardDescription className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
-              {roleConfig.description}
+              {mode === "FORGOT_PASSWORD"
+                ? forgotStep === 1
+                  ? "Enter your registered email address to receive an OTP verification code."
+                  : forgotStep === 2
+                  ? `Enter the 6-digit verification code sent to ${forgotEmail}.`
+                  : "Create and confirm your new password below."
+                : roleConfig.description}
             </CardDescription>
           </div>
 
-          {/* 3 Role/Category Tabs (Citizen is Default) */}
-          <div className="pt-2">
-            <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5 text-center">
-              Select User Category
-            </label>
-            <div
-              className="grid grid-cols-3 gap-1 sm:gap-1.5 p-1 sm:p-1.5 bg-slate-100 rounded-xl border border-slate-200/60"
-              role="tablist"
-              aria-label="User Category Selector"
-            >
-              {/* 1. Citizen Tab (Default) */}
-              <button
-                type="button"
-                role="tab"
-                id="tab-citizen"
-                aria-selected={role === "CITIZEN"}
-                onClick={() => handleRoleChange("CITIZEN")}
+          {/* If in FORGOT_PASSWORD mode: show step indicator */}
+          {mode === "FORGOT_PASSWORD" && (
+            <div className="flex items-center justify-center gap-2 pt-2">
+              <div
                 className={cn(
-                  "flex flex-col items-center justify-center py-2 px-1 rounded-lg text-xs font-semibold transition-all duration-150 cursor-pointer min-w-0",
-                  role === "CITIZEN"
-                    ? "bg-white text-blue-600 shadow-sm border border-slate-200/80 ring-1 ring-blue-500/20"
-                    : "text-slate-600 hover:text-slate-900 hover:bg-slate-200/60"
+                  "flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full transition-colors",
+                  forgotStep === 1
+                    ? "bg-amber-100 text-amber-900 font-semibold ring-1 ring-amber-400/40"
+                    : "bg-slate-100 text-slate-500 font-medium"
                 )}
               >
-                <User className="w-4 h-4 mb-0.5 shrink-0" />
-                <span className="truncate max-w-full text-[11px] sm:text-xs">Citizen</span>
-                <span className="text-[10px] font-normal text-slate-400 hidden sm:inline">
-                  (Default)
+                <span className="w-4 h-4 rounded-full bg-current text-white flex items-center justify-center text-[10px] font-bold shrink-0">
+                  1
                 </span>
-              </button>
-
-              {/* 2. Organization Tab */}
-              <button
-                type="button"
-                role="tab"
-                id="tab-organization"
-                aria-selected={role === "ORGANIZATION"}
-                onClick={() => handleRoleChange("ORGANIZATION")}
+                <span>Email</span>
+              </div>
+              <span className="text-slate-300 text-xs">→</span>
+              <div
                 className={cn(
-                  "flex flex-col items-center justify-center py-2 px-1 rounded-lg text-xs font-semibold transition-all duration-150 cursor-pointer min-w-0",
-                  role === "ORGANIZATION"
-                    ? "bg-white text-orange-600 shadow-sm border border-slate-200/80 ring-1 ring-orange-500/20"
-                    : "text-slate-600 hover:text-slate-900 hover:bg-slate-200/60"
+                  "flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full transition-colors",
+                  forgotStep === 2
+                    ? "bg-amber-100 text-amber-900 font-semibold ring-1 ring-amber-400/40"
+                    : "bg-slate-100 text-slate-500 font-medium"
                 )}
               >
-                <Building2 className="w-4 h-4 mb-0.5 shrink-0" />
-                <span className="truncate max-w-full text-[11px] sm:text-xs">Organization</span>
-                <span className="text-[10px] font-normal text-slate-400 hidden sm:inline">
-                  Authority
+                <span className="w-4 h-4 rounded-full bg-current text-white flex items-center justify-center text-[10px] font-bold shrink-0">
+                  2
                 </span>
-              </button>
-
-              {/* 3. Field Worker Tab */}
-              <button
-                type="button"
-                role="tab"
-                id="tab-worker"
-                aria-selected={role === "WORKER"}
-                onClick={() => handleRoleChange("WORKER")}
+                <span>OTP</span>
+              </div>
+              <span className="text-slate-300 text-xs">→</span>
+              <div
                 className={cn(
-                  "flex flex-col items-center justify-center py-2 px-1 rounded-lg text-xs font-semibold transition-all duration-150 cursor-pointer min-w-0",
-                  role === "WORKER"
-                    ? "bg-white text-indigo-600 shadow-sm border border-slate-200/80 ring-1 ring-indigo-500/20"
-                    : "text-slate-600 hover:text-slate-900 hover:bg-slate-200/60"
+                  "flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full transition-colors",
+                  forgotStep === 3
+                    ? "bg-amber-100 text-amber-900 font-semibold ring-1 ring-amber-400/40"
+                    : "bg-slate-100 text-slate-500 font-medium"
                 )}
               >
-                <HardHat className="w-4 h-4 mb-0.5 shrink-0" />
-                <span className="truncate max-w-full text-[11px] sm:text-xs">Field Worker</span>
-                <span className="text-[10px] font-normal text-slate-400 hidden sm:inline">
-                  Technician
+                <span className="w-4 h-4 rounded-full bg-current text-white flex items-center justify-center text-[10px] font-bold shrink-0">
+                  3
                 </span>
-              </button>
+                <span>Password</span>
+              </div>
             </div>
-          </div>
+          )}
+
+          {/* 3 Role/Category Tabs (Citizen is Default) - Only in Sign In and Sign Up */}
+          {mode !== "FORGOT_PASSWORD" && (
+            <div className="pt-2">
+              <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5 text-center">
+                Select User Category
+              </label>
+              <div
+                className="grid grid-cols-3 gap-1 sm:gap-1.5 p-1 sm:p-1.5 bg-slate-100 rounded-xl border border-slate-200/60"
+                role="tablist"
+                aria-label="User Category Selector"
+              >
+                {/* 1. Citizen Tab (Default) */}
+                <button
+                  type="button"
+                  role="tab"
+                  id="tab-citizen"
+                  aria-selected={role === "CITIZEN"}
+                  onClick={() => handleRoleChange("CITIZEN")}
+                  className={cn(
+                    "flex flex-col items-center justify-center py-2 px-1 rounded-lg text-xs font-semibold transition-all duration-150 cursor-pointer min-w-0",
+                    role === "CITIZEN"
+                      ? "bg-white text-blue-600 shadow-sm border border-slate-200/80 ring-1 ring-blue-500/20"
+                      : "text-slate-600 hover:text-slate-900 hover:bg-slate-200/60"
+                  )}
+                >
+                  <User className="w-4 h-4 mb-0.5 shrink-0" />
+                  <span className="truncate max-w-full text-[11px] sm:text-xs">Citizen</span>
+                  <span className="text-[10px] font-normal text-slate-400 hidden sm:inline">
+                    (Default)
+                  </span>
+                </button>
+
+                {/* 2. Organization Tab */}
+                <button
+                  type="button"
+                  role="tab"
+                  id="tab-organization"
+                  aria-selected={role === "ORGANIZATION"}
+                  onClick={() => handleRoleChange("ORGANIZATION")}
+                  className={cn(
+                    "flex flex-col items-center justify-center py-2 px-1 rounded-lg text-xs font-semibold transition-all duration-150 cursor-pointer min-w-0",
+                    role === "ORGANIZATION"
+                      ? "bg-white text-orange-600 shadow-sm border border-slate-200/80 ring-1 ring-orange-500/20"
+                      : "text-slate-600 hover:text-slate-900 hover:bg-slate-200/60"
+                  )}
+                >
+                  <Building2 className="w-4 h-4 mb-0.5 shrink-0" />
+                  <span className="truncate max-w-full text-[11px] sm:text-xs">Organization</span>
+                  <span className="text-[10px] font-normal text-slate-400 hidden sm:inline">
+                    Authority
+                  </span>
+                </button>
+
+                {/* 3. Field Worker Tab */}
+                <button
+                  type="button"
+                  role="tab"
+                  id="tab-worker"
+                  aria-selected={role === "WORKER"}
+                  onClick={() => handleRoleChange("WORKER")}
+                  className={cn(
+                    "flex flex-col items-center justify-center py-2 px-1 rounded-lg text-xs font-semibold transition-all duration-150 cursor-pointer min-w-0",
+                    role === "WORKER"
+                      ? "bg-white text-indigo-600 shadow-sm border border-slate-200/80 ring-1 ring-indigo-500/20"
+                      : "text-slate-600 hover:text-slate-900 hover:bg-slate-200/60"
+                  )}
+                >
+                  <HardHat className="w-4 h-4 mb-0.5 shrink-0" />
+                  <span className="truncate max-w-full text-[11px] sm:text-xs">Field Worker</span>
+                  <span className="text-[10px] font-normal text-slate-400 hidden sm:inline">
+                    Technician
+                  </span>
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Mode Switch: Sign In vs Create Account / Register */}
-          <div className="flex items-center justify-center pt-1">
-            <div className="inline-flex p-1 bg-slate-100 rounded-lg border border-slate-200/80 text-xs">
-              <button
-                type="button"
-                id="btn-mode-signin"
-                onClick={() => handleModeChange("SIGN_IN")}
-                className={cn(
-                  "px-4 py-1.5 rounded-md font-medium transition-all duration-150 cursor-pointer",
-                  mode === "SIGN_IN"
-                    ? "bg-white text-slate-900 shadow-xs font-semibold"
-                    : "text-slate-500 hover:text-slate-900"
-                )}
-              >
-                Sign In
-              </button>
-              <button
-                type="button"
-                id="btn-mode-signup"
-                onClick={() => handleModeChange("SIGN_UP")}
-                className={cn(
-                  "px-4 py-1.5 rounded-md font-medium transition-all duration-150 cursor-pointer",
-                  mode === "SIGN_UP"
-                    ? "bg-white text-slate-900 shadow-xs font-semibold"
-                    : "text-slate-500 hover:text-slate-900"
-                )}
-              >
-                {role === "ORGANIZATION" ? "Register Department" : "Create Account"}
-              </button>
+          {mode !== "FORGOT_PASSWORD" && (
+            <div className="flex items-center justify-center pt-1">
+              <div className="inline-flex p-1 bg-slate-100 rounded-lg border border-slate-200/80 text-xs">
+                <button
+                  type="button"
+                  id="btn-mode-signin"
+                  onClick={() => handleModeChange("SIGN_IN")}
+                  className={cn(
+                    "px-4 py-1.5 rounded-md font-medium transition-all duration-150 cursor-pointer",
+                    mode === "SIGN_IN"
+                      ? "bg-white text-slate-900 shadow-xs font-semibold"
+                      : "text-slate-500 hover:text-slate-900"
+                  )}
+                >
+                  Sign In
+                </button>
+                <button
+                  type="button"
+                  id="btn-mode-signup"
+                  onClick={() => handleModeChange("SIGN_UP")}
+                  className={cn(
+                    "px-4 py-1.5 rounded-md font-medium transition-all duration-150 cursor-pointer",
+                    mode === "SIGN_UP"
+                      ? "bg-white text-slate-900 shadow-xs font-semibold"
+                      : "text-slate-500 hover:text-slate-900"
+                  )}
+                >
+                  {role === "ORGANIZATION" ? "Register Department" : "Create Account"}
+                </button>
+              </div>
             </div>
-          </div>
+          )}
         </CardHeader>
 
         <CardContent className="pt-2">
@@ -357,6 +588,17 @@ function AuthPortal() {
           {mode === "SIGN_IN" && (
             <form action={signInAction} className="space-y-4">
               <input type="hidden" name="intendedRole" value={role} />
+
+              {signInSuccessMessage && (
+                <div
+                  id="signin-success-banner"
+                  className="p-3.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center gap-2 animate-in fade-in"
+                >
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>{signInSuccessMessage}</span>
+                </div>
+              )}
+
               {displayedSignInError && signInErrorRole === role && (
                 <div
                   id="signin-error"
@@ -367,6 +609,16 @@ function AuthPortal() {
                     <span>{displayedSignInError}</span>
                   </div>
                   <div className="flex flex-wrap gap-2 pt-1 pl-6">
+                    {displayedSignInError.toLowerCase().includes("incorrect password") && (
+                      <button
+                        type="button"
+                        id="btn-signin-error-forgot-password"
+                        onClick={handleStartForgotPassword}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-amber-100 hover:bg-amber-200 text-amber-800 font-semibold text-[11px] transition-colors cursor-pointer"
+                      >
+                        Forgot Password? Reset Here <ArrowRight className="w-3 h-3" />
+                      </button>
+                    )}
                     {displayedSignInError.toLowerCase().includes("not registered") && (
                       <button
                         type="button"
@@ -481,15 +733,36 @@ function AuthPortal() {
                 )}
               </div>
 
-              <Input
-                id="signin-password"
-                label="Password"
-                name="password"
-                type="password"
-                placeholder="••••••••"
-                required
-                autoComplete="current-password"
-              />
+              <div className="w-full space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label htmlFor="signin-password" className="block text-sm font-medium text-slate-700">
+                    Password
+                  </label>
+                  <button
+                    type="button"
+                    id="btn-forgot-password-link"
+                    onClick={handleStartForgotPassword}
+                    className={cn(
+                      "text-xs font-semibold hover:underline cursor-pointer transition-colors",
+                      role === "CITIZEN"
+                        ? "text-blue-600 hover:text-blue-700"
+                        : role === "ORGANIZATION"
+                        ? "text-orange-600 hover:text-orange-700"
+                        : "text-indigo-600 hover:text-indigo-700"
+                    )}
+                  >
+                    Forgot password?
+                  </button>
+                </div>
+                <Input
+                  id="signin-password"
+                  name="password"
+                  type="password"
+                  placeholder="••••••••"
+                  required
+                  autoComplete="current-password"
+                />
+              </div>
 
               <Button
                 id="signin-submit"
@@ -523,6 +796,265 @@ function AuthPortal() {
                 </button>
               </div>
             </form>
+          )}
+
+          {/* ======================================================== */}
+          {/* MODE: FORGOT / RESET PASSWORD                            */}
+          {/* ======================================================== */}
+          {mode === "FORGOT_PASSWORD" && (
+            <div className="space-y-4">
+              {/* Step 1: Provide Email & Request OTP */}
+              {forgotStep === 1 && (
+                <div className="space-y-4 animate-in fade-in">
+                  {forgotError && (
+                    <div
+                      id="forgot-step1-error"
+                      className="p-3.5 rounded-lg bg-red-50 border border-red-200 text-red-800 text-xs space-y-2 animate-in fade-in"
+                    >
+                      <div className="flex items-start gap-2">
+                        <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+                        <span>{forgotError}</span>
+                      </div>
+                      {forgotNotRegistered && (
+                        <div className="pt-1 pl-6">
+                          <button
+                            type="button"
+                            id="btn-forgot-not-registered-create"
+                            onClick={() => {
+                              setEmail(forgotEmail.trim());
+                              handleModeChange("SIGN_UP");
+                            }}
+                            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold text-[11px] transition-colors cursor-pointer shadow-xs"
+                          >
+                            Create New Account with this Email <ArrowRight className="w-3 h-3" />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="space-y-1.5">
+                    <Input
+                      id="forgot-email"
+                      label="Registered Account Email"
+                      type="email"
+                      value={forgotEmail}
+                      onChange={(e) => {
+                        setForgotEmail(e.target.value);
+                        setForgotError(null);
+                        setForgotNotRegistered(false);
+                      }}
+                      placeholder="you@example.com"
+                      required
+                      autoComplete="email"
+                    />
+                    <p className="text-[11px] text-slate-500 pl-1">
+                      Enter the email address registered with your account. We will verify your registration and send a verification OTP code.
+                    </p>
+                  </div>
+
+                  <Button
+                    type="button"
+                    id="btn-forgot-send-otp"
+                    onClick={handleSendResetOtp}
+                    isLoading={isSendingResetOtp}
+                    className="w-full bg-amber-600 hover:bg-amber-700 text-white font-medium"
+                  >
+                    Send Verification Code <ArrowRight className="w-4 h-4 ml-1.5" />
+                  </Button>
+
+                  <div className="pt-2 text-center">
+                    <button
+                      type="button"
+                      id="btn-forgot-step1-back-to-signin"
+                      onClick={() => {
+                        setMode("SIGN_IN");
+                        clearAllErrors();
+                      }}
+                      className="text-xs font-semibold text-slate-500 hover:text-slate-900 cursor-pointer inline-flex items-center gap-1"
+                    >
+                      <ArrowLeft className="w-3.5 h-3.5" /> Back to Sign In
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Step 2: Enter & Verify 6-digit OTP */}
+              {forgotStep === 2 && (
+                <div className="space-y-4 animate-in fade-in">
+                  <div className="p-3 rounded-lg bg-blue-50 border border-blue-200 text-blue-800 text-xs flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Mail className="w-4 h-4 text-blue-600 shrink-0" />
+                      <span>
+                        Verification code sent to <strong>{forgotEmail}</strong>
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setForgotStep(1);
+                        setForgotError(null);
+                      }}
+                      className="text-[11px] font-semibold text-blue-700 hover:underline cursor-pointer"
+                    >
+                      Change
+                    </button>
+                  </div>
+
+                  {forgotError && (
+                    <div
+                      id="forgot-step2-error"
+                      className="p-3 rounded-lg bg-red-50 border border-red-200 text-red-800 text-xs flex items-center gap-2 animate-in fade-in"
+                    >
+                      <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+                      <span>{forgotError}</span>
+                    </div>
+                  )}
+
+                  <div className="space-y-2 text-center">
+                    <label
+                      htmlFor="forgot-otp"
+                      className="block text-xs font-semibold uppercase tracking-wider text-slate-500"
+                    >
+                      Enter 6-Digit Verification Code
+                    </label>
+                    <input
+                      id="forgot-otp"
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      maxLength={6}
+                      value={forgotOtp}
+                      onChange={(e) => {
+                        const val = e.target.value.replace(/\D/g, "").slice(0, 6);
+                        setForgotOtp(val);
+                        setForgotError(null);
+                      }}
+                      placeholder="123456"
+                      className="w-full max-w-[240px] mx-auto text-center font-mono text-2xl tracking-[0.4em] py-2.5 px-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-amber-500 font-bold text-slate-800 bg-white"
+                      autoFocus
+                    />
+                  </div>
+
+                  <div className="text-center text-xs text-slate-500">
+                    {resetOtpCooldown > 0 ? (
+                      <span>
+                        Resend code in <strong className="text-slate-700">{resetOtpCooldown}s</strong>
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        id="btn-forgot-resend-otp"
+                        onClick={handleSendResetOtp}
+                        disabled={isSendingResetOtp}
+                        className="text-amber-700 font-semibold hover:underline cursor-pointer inline-flex items-center gap-1"
+                      >
+                        <RotateCcw className="w-3 h-3" /> Resend Verification Code
+                      </button>
+                    )}
+                  </div>
+
+                  <Button
+                    type="button"
+                    id="btn-forgot-verify-otp"
+                    onClick={handleVerifyResetOtp}
+                    isLoading={isVerifyingResetOtp}
+                    disabled={forgotOtp.length !== 6}
+                    className="w-full bg-amber-600 hover:bg-amber-700 text-white font-medium"
+                  >
+                    Verify Code & Continue <ArrowRight className="w-4 h-4 ml-1.5" />
+                  </Button>
+
+                  <div className="pt-2 text-center">
+                    <button
+                      type="button"
+                      id="btn-forgot-step2-back-to-signin"
+                      onClick={() => {
+                        setMode("SIGN_IN");
+                        clearAllErrors();
+                      }}
+                      className="text-xs font-semibold text-slate-500 hover:text-slate-900 cursor-pointer inline-flex items-center gap-1"
+                    >
+                      <ArrowLeft className="w-3.5 h-3.5" /> Back to Sign In
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Step 3: Enter New Password and Confirm Password */}
+              {forgotStep === 3 && (
+                <div className="space-y-4 animate-in fade-in">
+                  <div className="p-2.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span>
+                      Identity verified for <strong>{forgotEmail}</strong>. Please choose your new password.
+                    </span>
+                  </div>
+
+                  {forgotError && (
+                    <div
+                      id="forgot-step3-error"
+                      className="p-3 rounded-lg bg-red-50 border border-red-200 text-red-800 text-xs flex items-center gap-2 animate-in fade-in"
+                    >
+                      <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+                      <span>{forgotError}</span>
+                    </div>
+                  )}
+
+                  <Input
+                    id="forgot-new-password"
+                    label="New Password"
+                    type="password"
+                    value={forgotNewPassword}
+                    onChange={(e) => {
+                      setForgotNewPassword(e.target.value);
+                      setForgotError(null);
+                    }}
+                    placeholder="••••••••"
+                    required
+                    autoComplete="new-password"
+                  />
+
+                  <Input
+                    id="forgot-confirm-password"
+                    label="Confirm New Password"
+                    type="password"
+                    value={forgotConfirmPassword}
+                    onChange={(e) => {
+                      setForgotConfirmPassword(e.target.value);
+                      setForgotError(null);
+                    }}
+                    placeholder="••••••••"
+                    required
+                    autoComplete="new-password"
+                  />
+
+                  <Button
+                    type="button"
+                    id="btn-forgot-submit-password"
+                    onClick={handleResetPasswordSubmit}
+                    isLoading={isResettingPassword}
+                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-medium shadow-sm"
+                  >
+                    Save Password & Return to Sign In <ArrowRight className="w-4 h-4 ml-1.5" />
+                  </Button>
+
+                  <div className="pt-2 text-center">
+                    <button
+                      type="button"
+                      id="btn-forgot-step3-back-to-signin"
+                      onClick={() => {
+                        setMode("SIGN_IN");
+                        clearAllErrors();
+                      }}
+                      className="text-xs font-semibold text-slate-500 hover:text-slate-900 cursor-pointer inline-flex items-center gap-1"
+                    >
+                      <ArrowLeft className="w-3.5 h-3.5" /> Cancel and Return to Sign In
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           )}
 
           {/* ======================================================== */}
