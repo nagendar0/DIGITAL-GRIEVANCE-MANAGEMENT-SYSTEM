@@ -23,13 +23,34 @@ export async function createGrievance(prevState: any, formData: FormData) {
     return { error: "Authentication required to file a grievance." };
   }
 
+  let lat = parseFloat(formData.get("latitude") as string);
+  let lng = parseFloat(formData.get("longitude") as string);
+  const coarseAddress = ((formData.get("coarseAddress") as string) || "").trim();
+
+  const isMockCoord =
+    !isNaN(lat) &&
+    !isNaN(lng) &&
+    Math.abs(lat - 12.9716) < 0.005 &&
+    Math.abs(lng - 77.5946) < 0.005;
+
+  if (isNaN(lat) || isNaN(lng) || isMockCoord) {
+    if (coarseAddress.length >= 3) {
+      const { forwardGeocodeAddress } = await import("@/lib/geo/forward-geocode");
+      const geocoded = await forwardGeocodeAddress(coarseAddress);
+      if (geocoded) {
+        lat = geocoded.lat;
+        lng = geocoded.lng;
+      }
+    }
+  }
+
   const rawData = {
     title: formData.get("title") as string,
     category: formData.get("category") as string,
     description: formData.get("description") as string,
-    latitude: parseFloat(formData.get("latitude") as string),
-    longitude: parseFloat(formData.get("longitude") as string),
-    coarseAddress: formData.get("coarseAddress") as string,
+    latitude: lat,
+    longitude: lng,
+    coarseAddress,
     imagePath: formData.get("imagePath") as string,
   };
 
@@ -278,3 +299,73 @@ export async function reverseGeocodeLocation(lat: number, lng: number) {
   const { reverseGeocodeCoordinates } = await import("@/lib/geo/reverse-geocode");
   return await reverseGeocodeCoordinates(lat, lng);
 }
+
+export async function forwardGeocode(address: string) {
+  const { forwardGeocodeAddress } = await import("@/lib/geo/forward-geocode");
+  return await forwardGeocodeAddress(address);
+}
+
+export async function calibrateGrievanceLocation(
+  grievanceId: string,
+  latitude: number,
+  longitude: number
+) {
+  const user = await getCurrentUserWithRole();
+  if (!user || (user.role !== "WORKER" && user.role !== "PLATFORM_ADMIN")) {
+    return { error: "Unauthorized: Field technician credentials required." };
+  }
+
+  if (
+    isNaN(latitude) ||
+    isNaN(longitude) ||
+    latitude < -90 ||
+    latitude > 90 ||
+    longitude < -180 ||
+    longitude > 180
+  ) {
+    return { error: "Invalid GPS coordinates." };
+  }
+
+  const adminClient = createAdminClient();
+  const { data: grievance, error: fetchErr } = await adminClient
+    .from("grievances")
+    .select("id, assigned_worker_id, latitude, longitude, public_id")
+    .eq("id", grievanceId)
+    .single();
+
+  if (fetchErr || !grievance) {
+    return { error: "Grievance not found." };
+  }
+
+  if (user.role === "WORKER" && grievance.assigned_worker_id !== user.workerId) {
+    return { error: "Forbidden: You are not assigned to this job." };
+  }
+
+  // Update grievance coordinates
+  const { error: updateErr } = await adminClient
+    .from("grievances")
+    .update({
+      latitude,
+      longitude,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", grievanceId);
+
+  if (updateErr) {
+    return { error: updateErr.message || "Failed to update GPS coordinates." };
+  }
+
+  // Status history note
+  await adminClient.from("grievance_status_history").insert({
+    grievance_id: grievanceId,
+    from_status: null,
+    to_status: null,
+    changed_by: user.id,
+    notes: `Field technician calibrated target GPS to on-site coordinates (${latitude.toFixed(6)}, ${longitude.toFixed(6)}).`,
+  });
+
+  revalidatePath(`/worker/jobs/${grievanceId}`);
+  revalidatePath("/worker");
+  return { success: true };
+}
+

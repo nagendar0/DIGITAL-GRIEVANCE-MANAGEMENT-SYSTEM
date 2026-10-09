@@ -4,21 +4,30 @@ import { useState, useEffect, useCallback } from "react";
 import { Navigation, MapPin, RefreshCw, AlertCircle, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
+import { useRouter } from "next/navigation";
+import { calibrateGrievanceLocation } from "@/server/actions/grievance";
+
 interface WorkerDistanceCalculatorProps {
   targetLatitude: number;
   targetLongitude: number;
   compact?: boolean;
+  grievanceId?: string;
 }
 
 export function WorkerDistanceCalculator({
   targetLatitude,
   targetLongitude,
   compact = false,
+  grievanceId,
 }: WorkerDistanceCalculatorProps) {
+  const router = useRouter();
   const [distanceMeters, setDistanceMeters] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [accuracy, setAccuracy] = useState<number | null>(null);
+  const [workerCoords, setWorkerCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [isCalibrating, setIsCalibrating] = useState(false);
+  const [calibrateSuccess, setCalibrateSuccess] = useState(false);
 
   const calculateDistance = useCallback((workerLat: number, workerLon: number) => {
     const R = 6371e3; // Earth's radius in meters
@@ -47,6 +56,7 @@ export function WorkerDistanceCalculator({
       (position) => {
         const currentLat = position.coords.latitude;
         const currentLon = position.coords.longitude;
+        setWorkerCoords({ lat: currentLat, lng: currentLon });
         setAccuracy(Math.round(position.coords.accuracy));
         const dist = calculateDistance(currentLat, currentLon);
         setDistanceMeters(dist);
@@ -64,6 +74,29 @@ export function WorkerDistanceCalculator({
       }
     );
   }, [calculateDistance]);
+
+  const handleCalibrate = async () => {
+    if (!grievanceId || !workerCoords) return;
+    setIsCalibrating(true);
+    try {
+      const res = await calibrateGrievanceLocation(
+        grievanceId,
+        workerCoords.lat,
+        workerCoords.lng
+      );
+      if (res?.success) {
+        setCalibrateSuccess(true);
+        setDistanceMeters(0);
+        router.refresh();
+      } else if (res?.error) {
+        setError(res.error);
+      }
+    } catch (err: any) {
+      setError(err?.message || "Calibration failed.");
+    } finally {
+      setIsCalibrating(false);
+    }
+  };
 
   useEffect(() => {
     updateLocation();
@@ -179,6 +212,41 @@ export function WorkerDistanceCalculator({
             </span>
             {accuracy && <span>GPS Accuracy: ±{accuracy}m</span>}
           </div>
+
+          {grievanceId && !isWithinSiteRadius && workerCoords && (
+            <div className="pt-2 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <span className="text-[11px] text-slate-500">
+                At the reported incident site right now?
+              </span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleCalibrate}
+                disabled={isCalibrating}
+                className="text-[11px] h-7 px-2.5 text-blue-700 border-blue-200 hover:bg-blue-50 font-semibold self-start sm:self-auto cursor-pointer"
+              >
+                {isCalibrating ? (
+                  <>
+                    <RefreshCw className="w-3 h-3 animate-spin mr-1" />
+                    Calibrating...
+                  </>
+                ) : (
+                  <>
+                    <MapPin className="w-3 h-3 mr-1 text-blue-600" />
+                    Sync Pin to My Location
+                  </>
+                )}
+              </Button>
+            </div>
+          )}
+
+          {calibrateSuccess && (
+            <p className="text-[11px] text-emerald-700 font-semibold flex items-center gap-1 bg-emerald-50 p-2 rounded-lg border border-emerald-200">
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+              Target GPS successfully aligned with your verified on-site position.
+            </p>
+          )}
         </div>
       ) : null}
     </div>

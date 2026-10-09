@@ -219,22 +219,36 @@ export default async function WorkerJobDetailPage({ params }: WorkerJobPageProps
                   Target GPS: {grievance.latitude.toFixed(6)}, {grievance.longitude.toFixed(6)}
                 </p>
               </div>
-              <a
-                href={`https://www.google.com/maps/dir/?api=1&destination=${grievance.latitude},${grievance.longitude}`}
-                target="_blank"
-                rel="noreferrer"
-              >
-                <Button size="sm" className="bg-blue-600 hover:bg-blue-700 text-white text-xs h-8 flex items-center gap-1.5 w-full sm:w-auto font-medium">
-                  <Navigation className="w-3.5 h-3.5" />
-                  Launch Turn-by-Turn GPS Map
-                </Button>
-              </a>
+              {(() => {
+                const isMockBangalore =
+                  Math.abs(grievance.latitude - 12.9716) < 0.005 &&
+                  Math.abs(grievance.longitude - 77.5946) < 0.005;
+
+                const destinationQuery =
+                  isMockBangalore && grievance.coarse_address
+                    ? encodeURIComponent(grievance.coarse_address)
+                    : `${grievance.latitude},${grievance.longitude}`;
+
+                return (
+                  <a
+                    href={`https://www.google.com/maps/dir/?api=1&destination=${destinationQuery}`}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <Button size="sm" className="bg-blue-600 hover:bg-blue-700 text-white text-xs h-8 flex items-center gap-1.5 w-full sm:w-auto font-medium cursor-pointer">
+                      <Navigation className="w-3.5 h-3.5" />
+                      Launch Turn-by-Turn GPS Map
+                    </Button>
+                  </a>
+                );
+              })()}
             </div>
 
             {/* Live GPS Distance Calculator */}
             <WorkerDistanceCalculator
               targetLatitude={grievance.latitude}
               targetLongitude={grievance.longitude}
+              grievanceId={grievance.id}
             />
 
             <p className="text-[11px] text-slate-500 italic">

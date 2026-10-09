@@ -118,19 +118,34 @@ export default function NewGrievancePage() {
     );
   };
 
-  // Auto-detect on mount if permission already granted
+  // Auto-detect on mount
   useEffect(() => {
-    if (typeof window !== "undefined" && navigator.permissions && navigator.geolocation) {
-      navigator.permissions
-        .query({ name: "geolocation" as PermissionName })
-        .then((result) => {
-          if (result.state === "granted") {
-            handleCaptureLocation();
-          }
-        })
-        .catch(() => {});
+    if (typeof window !== "undefined" && navigator.geolocation) {
+      handleCaptureLocation();
     }
   }, []);
+
+  const handleAddressBlur = async () => {
+    if (!coords && streetAddress.trim().length >= 3) {
+      setIsResolvingAddress(true);
+      try {
+        const { forwardGeocode } = await import("@/server/actions/grievance");
+        const res = await forwardGeocode(streetAddress.trim());
+        if (res) {
+          setCoords({
+            lat: res.lat,
+            lng: res.lng,
+            accuracy: 100,
+          });
+          setDetectedLocationName(res.displayName);
+        }
+      } catch (err) {
+        console.warn("Forward geocoding blur failed:", err);
+      } finally {
+        setIsResolvingAddress(false);
+      }
+    }
+  };
 
   const processImageFile = async (file: File) => {
     // Check size limit (100MB)
@@ -719,8 +734,8 @@ export default function NewGrievancePage() {
                   </div>
                 )}
 
-                <input type="hidden" name="latitude" value={coords?.lat || 12.9716} />
-                <input type="hidden" name="longitude" value={coords?.lng || 77.5946} />
+                <input type="hidden" name="latitude" value={coords?.lat ?? ""} />
+                <input type="hidden" name="longitude" value={coords?.lng ?? ""} />
 
                 {/* Street / Landmark Address Input (Auto-filled & Citizen Editable) */}
                 <div className="space-y-1.5 pt-1">
@@ -743,6 +758,7 @@ export default function NewGrievancePage() {
                     name="coarseAddress"
                     value={streetAddress}
                     onChange={(e) => setStreetAddress(e.target.value)}
+                    onBlur={handleAddressBlur}
                     placeholder="e.g. Opposite Metro Pillar 142, Indiranagar 100 Feet Road"
                     required
                   />
