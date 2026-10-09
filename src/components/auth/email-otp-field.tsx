@@ -12,7 +12,7 @@ interface EmailOtpFieldProps {
   label: string;
   name: string;
   placeholder: string;
-  roleContext: "Field Worker" | "Authority Admin" | "Department Official";
+  roleContext: "Citizen" | "Field Worker" | "Authority Admin" | "Department Official";
   tokenInputName: string;
   accentColor?: "blue" | "orange" | "indigo";
   onVerifiedChange?: (verified: boolean, email: string) => void;

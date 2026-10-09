@@ -35,7 +35,7 @@ export async function isEmailVerifiedInDb(email: string): Promise<boolean> {
  */
 export async function sendOtp(
   email: string,
-  roleContext: "Field Worker" | "Authority Admin" | "Department Official"
+  roleContext: "Citizen" | "Field Worker" | "Authority Admin" | "Department Official"
 ): Promise<{ success: boolean; message?: string; error?: string }> {
   const validation = emailSchema.safeParse(email);
   if (!validation.success) {
@@ -48,7 +48,36 @@ export async function sendOtp(
     const admin = createAdminClient();
 
     // Check if email is already registered specifically for this role before sending OTP
-    if (roleContext === "Authority Admin") {
+    if (roleContext === "Citizen") {
+      const { data: userList } = await admin.auth.admin.listUsers();
+      const existingUser = userList?.users?.find((u) => u.email?.toLowerCase() === cleanEmail);
+      if (existingUser) {
+        const { data: existingProfile } = await admin
+          .from("profiles")
+          .select("role")
+          .eq("id", existingUser.id)
+          .maybeSingle();
+
+        const { data: isWorker } = await admin
+          .from("workers")
+          .select("id")
+          .eq("user_id", existingUser.id)
+          .maybeSingle();
+
+        const { data: isOrg } = await admin
+          .from("organization_members")
+          .select("id")
+          .eq("user_id", existingUser.id)
+          .maybeSingle();
+
+        if (existingProfile?.role === "CITIZEN" && !isWorker && !isOrg) {
+          return {
+            success: false,
+            error: "Already registered. An account with this email is already registered as a Citizen. Please log in.",
+          };
+        }
+      }
+    } else if (roleContext === "Authority Admin") {
       const { data: userList } = await admin.auth.admin.listUsers();
       const existingUser = userList?.users?.find((u) => u.email?.toLowerCase() === cleanEmail);
       if (existingUser) {

@@ -165,7 +165,8 @@ function AuthPortal() {
     return () => clearTimeout(timer);
   }, [email, role, mode]);
 
-  // Track email verification status for Organization and Field Worker
+  // Track email verification status for Citizen, Organization, and Field Worker
+  const [isCitizenEmailVerified, setIsCitizenEmailVerified] = useState(false);
   const [isAdminEmailVerified, setIsAdminEmailVerified] = useState(false);
   const [isOfficialEmailVerified, setIsOfficialEmailVerified] = useState(false);
   const [isWorkerEmailVerified, setIsWorkerEmailVerified] = useState(false);
@@ -562,79 +563,18 @@ function AuthPortal() {
                 autoComplete="name"
               />
 
-              <div className="space-y-1.5">
-                <Input
-                  id="citizen-email"
-                  label="Email Address"
-                  name="email"
-                  type="email"
-                  value={email}
-                  onChange={(e) => handleEmailChange(e.target.value)}
-                  onBlur={() => {
-                    if (email.trim()) runEmailDomainCheck(email.trim(), "CITIZEN", "SIGN_UP");
-                  }}
-                  placeholder="rahul@example.com"
-                  required
-                  autoComplete="email"
-                />
-
-                {isCheckingEmail && (
-                  <p className="text-[11px] text-slate-500 animate-pulse pl-1">
-                    Checking registration status...
-                  </p>
-                )}
-
-                {!isCheckingEmail && emailCheck && mode === "SIGN_UP" && role === "CITIZEN" && (
-                  <div className="pt-1">
-                    {emailCheck.status === "ALREADY_REGISTERED" && (
-                      <div className="p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-900 text-xs space-y-1.5">
-                        <div className="flex items-center gap-1.5">
-                          <AlertCircle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                          <span>Already registered. An account with this email is already registered. Please log in.</span>
-                        </div>
-                        <button
-                          type="button"
-                          id="btn-citizen-live-switch-signin"
-                          onClick={() => handleModeChange("SIGN_IN")}
-                          className="inline-flex items-center gap-1 font-semibold text-blue-700 hover:underline pl-5 cursor-pointer text-[11px]"
-                        >
-                          Sign In as Citizen →
-                        </button>
-                      </div>
-                    )}
-                    {(emailCheck.status === "NOT_REGISTERED" || emailCheck.status === "AVAILABLE") && (
-                      <div className="flex items-center gap-1.5 text-[11px] text-emerald-700 pl-1 font-medium">
-                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                        <span>{emailCheck.message || "Email available. Ready for Citizen registration."}</span>
-                      </div>
-                    )}
-                    {emailCheck.status === "DIFFERENT_ROLE" && (
-                      <div className="p-3 rounded-lg bg-blue-50 border border-blue-200 text-blue-900 text-xs space-y-2">
-                        <div className="flex items-start gap-2">
-                          <AlertCircle className="w-3.5 h-3.5 text-blue-600 shrink-0 mt-0.5" />
-                          <div>
-                            <span className="font-semibold block">{emailCheck.message}</span>
-                            <span className="text-[11px] text-blue-700 block mt-0.5">
-                              This email already has an active account. You can log in directly using your existing credentials to access the platform.
-                            </span>
-                          </div>
-                        </div>
-                        <div className="pt-1 pl-5">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              handleModeChange("SIGN_IN");
-                            }}
-                            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold text-[11px] transition-colors cursor-pointer shadow-xs"
-                          >
-                            Sign In to Existing Account →
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
+              {/* Citizen Email with SMTP OTP Verification */}
+              <EmailOtpField
+                id="citizen-email"
+                label="Citizen Email Address (Verified via SMTP OTP)"
+                name="email"
+                placeholder="rahul@example.com"
+                roleContext="Citizen"
+                tokenInputName="citizenEmailVerificationToken"
+                accentColor="blue"
+                onVerifiedChange={(verified) => setIsCitizenEmailVerified(verified)}
+                required
+              />
 
               <Input
                 id="citizen-phone"
@@ -667,10 +607,22 @@ function AuthPortal() {
               <Button
                 id="citizen-signup-submit"
                 type="submit"
-                className={cn("w-full mt-2 font-medium transition-all", roleConfig.btnClass)}
+                disabled={!isCitizenEmailVerified || isPending}
+                className={cn(
+                  "w-full mt-2 font-medium transition-all",
+                  isCitizenEmailVerified
+                    ? roleConfig.btnClass
+                    : "bg-slate-300 hover:bg-slate-300 text-slate-500 cursor-not-allowed shadow-none"
+                )}
                 isLoading={isPending}
               >
-                Create Citizen Account <ArrowRight className="w-4 h-4 ml-1.5" />
+                {isCitizenEmailVerified ? (
+                  <>
+                    Create Citizen Account <ArrowRight className="w-4 h-4 ml-1.5" />
+                  </>
+                ) : (
+                  "Verify Email with OTP to Register"
+                )}
               </Button>
 
               <div className="pt-3 text-center text-xs text-slate-500">

@@ -507,6 +507,19 @@ export async function signUpCitizen(prevState: any, formData: FormData) {
   }
 
   const cleanEmail = validated.data.email.trim().toLowerCase();
+
+  // Enforce OTP verification for Citizen Registration
+  const citizenEmailToken = formData.get("citizenEmailVerificationToken") as string | null;
+  const isCitizenVerified =
+    (await isEmailVerifiedInDb(cleanEmail)) ||
+    (citizenEmailToken && verifyEmailSignature(citizenEmailToken, cleanEmail));
+
+  if (!isCitizenVerified) {
+    return {
+      error: "Please verify your email address with the 6-digit OTP code before creating your Citizen account.",
+    };
+  }
+
   const existingUser = await getExistingAuthUserByEmail(cleanEmail);
   const adminClient = createAdminClient();
   const supabase = await createClient();
@@ -797,6 +810,19 @@ export async function signUpWorker(prevState: any, formData: FormData) {
   }
 
   const cleanEmail = validated.data.email.trim().toLowerCase();
+
+  // Enforce OTP verification for Worker Registration
+  const workerEmailToken = formData.get("workerEmailVerificationToken") as string | null;
+  const isWorkerVerified =
+    (await isEmailVerifiedInDb(cleanEmail)) ||
+    (workerEmailToken && verifyEmailSignature(workerEmailToken, cleanEmail));
+
+  if (!isWorkerVerified) {
+    return {
+      error: "Please verify your email address with the 6-digit OTP code before registering as a Field Worker.",
+    };
+  }
+
   const adminClient = createAdminClient();
   const existingUser = await getExistingAuthUserByEmail(cleanEmail);
 
