@@ -27,6 +27,7 @@ interface AssignWorkerFormProps {
   grievanceId: string;
   workers: WorkerOption[];
   grievanceCategory?: string;
+  isReassign?: boolean;
 }
 
 const COMMON_ROLES = [
@@ -40,7 +41,13 @@ const COMMON_ROLES = [
   { value: "GENERAL", label: "General Municipal Maintenance", keywords: ["general", "maintenance", "municipal", "repair"] },
 ];
 
-export function AssignWorkerForm({ grievanceId, workers, grievanceCategory }: AssignWorkerFormProps) {
+export function AssignWorkerForm({
+  grievanceId,
+  workers,
+  grievanceCategory,
+  isReassign = false,
+}: AssignWorkerFormProps) {
+  const [showReassignForm, setShowReassignForm] = useState(!isReassign);
   // Try to default to a role matching grievanceCategory if applicable
   const initialRole = useMemo(() => {
     if (!grievanceCategory) return "ALL";
@@ -137,8 +144,75 @@ export function AssignWorkerForm({ grievanceId, workers, grievanceCategory }: As
     );
   }
 
+  if (isReassign && !showReassignForm) {
+    return (
+      <div className="pt-1">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => setShowReassignForm(true)}
+          className="w-full text-xs text-slate-700 hover:text-slate-900 border-slate-200 hover:bg-slate-100 flex items-center justify-center gap-1.5"
+        >
+          <UserCheck className="w-3.5 h-3.5 text-slate-500" />
+          Re-assign to Different Technician
+        </Button>
+      </div>
+    );
+  }
+
+  if (isReassign && showReassignForm && workers.length === 0) {
+    return (
+      <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 text-xs text-slate-600 space-y-2.5 animate-in fade-in">
+        <div className="flex items-start gap-2">
+          <AlertTriangle className="w-4 h-4 text-slate-500 shrink-0 mt-0.5" />
+          <div>
+            <p className="font-semibold text-slate-800">No Other Technicians Available</p>
+            <p className="text-[11px] text-slate-500 mt-0.5">
+              There are currently no other registered technicians in your organization roster to reassign to.
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 pt-1">
+          <Link href="/org/workers">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="text-[11px] h-7 bg-white text-slate-700 border-slate-300 hover:bg-slate-100 flex items-center gap-1"
+            >
+              <PlusCircle className="w-3 h-3 text-blue-600" />
+              Onboard Technician
+            </Button>
+          </Link>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => setShowReassignForm(false)}
+            className="text-[11px] h-7 text-slate-600 hover:text-slate-900"
+          >
+            Cancel
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
+      {isReassign && (
+        <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+          <span className="text-xs font-semibold text-slate-800">Choose Replacement Technician</span>
+          <button
+            type="button"
+            onClick={() => setShowReassignForm(false)}
+            className="text-[11px] text-slate-500 hover:text-slate-800 underline"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
       {/* 1. Specific Role / Skill Filter */}
       <div>
         <label className="block text-xs font-semibold text-slate-700 mb-1.5 flex items-center justify-between">

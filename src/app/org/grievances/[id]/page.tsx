@@ -373,17 +373,22 @@ export default async function OrgGrievanceDetailPage({ params }: OrgGrievancePag
                     <div className="text-xs text-slate-500 space-y-1">
                       <p className="flex items-center gap-1.5 text-slate-700">
                         <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                        Technician currently holds active dispatch assignment.
+                        {grievance.status === "ASSIGNED" && "Dispatched: Awaiting technician acceptance on field portal."}
+                        {grievance.status === "ACCEPTED" && "Accepted: Technician is preparing to travel to site."}
+                        {grievance.status === "IN_PROGRESS" && "In Progress: Technician is actively working on-site."}
+                        {grievance.status === "AWAITING_VERIFICATION" && "Completed: Awaiting photo & AI verification review."}
+                        {["VERIFIED", "CLOSED"].includes(grievance.status) && "Resolved: Job completed and verified."}
+                        {grievance.status === "REWORK_REQUIRED" && "Rework Required: Previous attempt rejected."}
                       </p>
                     </div>
 
                     {(grievance.status === "ASSIGNED" || grievance.status === "REWORK_REQUIRED") && (
                       <div className="pt-2 border-t border-slate-100">
-                        <p className="text-xs font-medium text-slate-700 mb-2">Re-assign to another technician:</p>
                         <AssignWorkerForm
                           grievanceId={grievance.id}
                           workers={workerOptions.filter((w) => w.id !== assignedWorker.id)}
                           grievanceCategory={grievance.category}
+                          isReassign={true}
                         />
                       </div>
                     )}
