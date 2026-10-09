@@ -32,7 +32,7 @@ export async function assignWorkerToGrievance(input: AssignWorkerInput) {
   // 2. Fetch grievance and verify state
   const { data: grievance, error: grievanceError } = await adminClient
     .from("grievances")
-    .select("id, public_id, status, assigned_org_id, citizen_id, title")
+    .select("id, public_id, status, assigned_org_id, assigned_worker_id, citizen_id, title")
     .eq("id", input.grievanceId)
     .single();
 
@@ -48,8 +48,13 @@ export async function assignWorkerToGrievance(input: AssignWorkerInput) {
     };
   }
 
-  // If already claimed by another org, block
-  if (grievance.assigned_org_id && grievance.assigned_org_id !== user.organizationId) {
+  // If already actively claimed/serviced by another organization, block
+  const isClaimedByOtherOrg =
+    grievance.assigned_org_id &&
+    grievance.assigned_org_id !== user.organizationId &&
+    (grievance.status !== "PENDING" || grievance.assigned_worker_id);
+
+  if (isClaimedByOtherOrg) {
     return { error: "This grievance is already claimed by another operational organization." };
   }
 

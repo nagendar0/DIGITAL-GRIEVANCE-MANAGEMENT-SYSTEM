@@ -42,6 +42,14 @@ Citizen Title: "${title}"
 Reported Category: "${category}"
 Detailed Description: "${description}"
 
+Department Routing Rules:
+- "ELECTRICITY_BOARD": Streetlights, dark streets/alleys due to lighting, broken street lamps, hanging or exposed electrical wires, transformers, electric power poles, short circuits, blackouts.
+- "WATER_BOARD": Water pipeline leaks or bursts, contaminated drinking water, open gutters, sewer overflows, drainage blockage, missing manhole covers.
+- "PUBLIC_WORKS": Potholes, broken roads, damaged footpaths/pavements, road dividers, bridge defects, civil infrastructure repairs.
+- "SANITATION": Garbage dumps, overflowing public trash bins, uncollected waste, rotting debris, dead animal removal, street sweeping.
+- "TRANSPORT_AUTHORITY": Traffic signals, damaged road signs, traffic congestion barriers, public bus stops.
+- "MUNICIPALITY": General civic administration, public parks, illegal hoardings/constructions, trade licenses, or general civic issues not belonging to specialized boards above.
+
 Return a valid JSON object matching this exact schema:
 {
   "suggested_category": "string (refined department category)",
@@ -88,34 +96,55 @@ Return a valid JSON object matching this exact schema:
     }
 
     // 3. Automated routing: find a verified organization matching suggested_department
-    const { data: matchingOrgs } = await adminClient
-      .from("organizations")
-      .select("id, name")
-      .eq("type", parsed.suggested_department)
-      .eq("status", "VERIFIED")
-      .limit(1);
+    const { data: currentGrievance } = await adminClient
+      .from("grievances")
+      .select("assigned_org_id, status, assigned_worker_id, organizations (type)")
+      .eq("id", grievanceId)
+      .single();
 
-    if (matchingOrgs && matchingOrgs.length > 0) {
-      const targetOrg = matchingOrgs[0];
-      await adminClient
-        .from("grievances")
-        .update({ assigned_org_id: targetOrg.id })
-        .eq("id", grievanceId);
+    // Do NOT re-route if grievance is already assigned to a worker or is beyond PENDING state
+    const isAlreadyBeingHandled = currentGrievance && (
+      currentGrievance.status !== "PENDING" ||
+      Boolean(currentGrievance.assigned_worker_id)
+    );
 
-      // Audit log the automated routing
-      await adminClient.from("audit_logs").insert({
-        actor_id: null,
-        actor_role: "PLATFORM_ADMIN",
-        action: "AI_ROUTED_TO_ORGANIZATION",
-        resource_type: "grievances",
-        resource_id: grievanceId,
-        details: {
-          org_id: targetOrg.id,
-          org_name: targetOrg.name,
-          department_type: parsed.suggested_department,
-          ai_confidence: 0.95,
-        },
-      });
+    // Do NOT overwrite an already specialized organization routing with generic MUNICIPALITY
+    const currentOrgType = (currentGrievance?.organizations as any)?.type;
+    const isDowngradeToMunicipality =
+      Boolean(currentOrgType) &&
+      currentOrgType !== "MUNICIPALITY" &&
+      parsed.suggested_department === "MUNICIPALITY";
+
+    if (!isAlreadyBeingHandled && !isDowngradeToMunicipality) {
+      const { data: matchingOrgs } = await adminClient
+        .from("organizations")
+        .select("id, name")
+        .eq("type", parsed.suggested_department)
+        .eq("status", "VERIFIED")
+        .limit(1);
+
+      if (matchingOrgs && matchingOrgs.length > 0) {
+        const targetOrg = matchingOrgs[0];
+        await adminClient
+          .from("grievances")
+          .update({ assigned_org_id: targetOrg.id })
+          .eq("id", grievanceId);
+
+        // Audit log the automated routing
+        await adminClient.from("audit_logs").insert({
+          actor_id: null,
+          actor_role: "PLATFORM_ADMIN",
+          action: "AI_ROUTED_TO_ORGANIZATION",
+          resource_type: "grievances",
+          resource_id: grievanceId,
+          details: {
+            org_id: targetOrg.id,
+            org_name: targetOrg.name,
+            department_type: parsed.suggested_department,
+            ai_confidence: 0.95,
+          },
+        });
+      }
     }
 
     console.log(`AI Triage completed for grievance ${grievanceId}`);
