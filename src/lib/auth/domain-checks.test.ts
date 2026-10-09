@@ -330,4 +330,111 @@ describe("checkEmailDomainStatus Category & Sector Enrollment Isolation", () => 
       "Already registered. An account with this email is already registered as a Field Worker. Please log in."
     );
   });
+
+  it("checkEmailDomainStatus marks existing email as ALREADY_REGISTERED in Citizen SIGN_UP mode", async () => {
+    const mockFrom = vi.fn().mockReturnValue({
+      select: vi.fn().mockReturnValue({
+        ilike: vi.fn().mockReturnValue({
+          maybeSingle: vi.fn().mockResolvedValue({ data: null }),
+        }),
+        eq: vi.fn().mockReturnValue({
+          maybeSingle: vi.fn().mockResolvedValue({ data: null }),
+        }),
+      }),
+    });
+
+    vi.mocked(createAdminClient).mockReturnValue({
+      auth: {
+        admin: {
+          listUsers: vi.fn().mockResolvedValue({
+            data: {
+              users: [
+                { id: "u-citizen", email: "existing@citizen.com", user_metadata: { role: "CITIZEN" } },
+              ],
+            },
+          }),
+        },
+      },
+      from: mockFrom,
+    } as any);
+
+    const res = await checkEmailDomainStatus("existing@citizen.com", "CITIZEN", "SIGN_UP");
+    expect(res.status).toBe("ALREADY_REGISTERED");
+    expect(res.message).toContain("Already registered");
+    expect(res.message).toContain("Please go to sign in");
+  });
+
+  it("sendOtp blocks an existing registered user from receiving Citizen signup OTP", async () => {
+    const { sendOtp } = await import("@/server/actions/otp");
+    vi.mocked(createAdminClient).mockReturnValue({
+      auth: {
+        admin: {
+          listUsers: vi.fn().mockResolvedValue({
+            data: {
+              users: [
+                { id: "u-citizen", email: "existing@citizen.com", user_metadata: { role: "CITIZEN" } },
+              ],
+            },
+          }),
+        },
+      },
+      from: vi.fn().mockReturnValue({
+        upsert: vi.fn().mockResolvedValue({ error: null }),
+      }),
+    } as any);
+
+    const res = await sendOtp("existing@citizen.com", "Citizen");
+    expect(res.success).toBe(false);
+    expect(res.error).toContain("Already registered");
+    expect(res.error).toContain("Please log in");
+  });
+
+  it("signUpCitizen blocks registration when email is already registered", async () => {
+    const { signUpCitizen } = await import("@/server/actions/auth");
+    vi.mocked(createAdminClient).mockReturnValue({
+      auth: {
+        admin: {
+          listUsers: vi.fn().mockResolvedValue({
+            data: {
+              users: [
+                { id: "u-citizen", email: "existing@citizen.com", user_metadata: { role: "CITIZEN" } },
+              ],
+            },
+          }),
+        },
+      },
+      from: vi.fn((table: string) => {
+        if (table === "email_verifications") {
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                single: vi.fn().mockResolvedValue({
+                  data: { verified_at: new Date().toISOString() },
+                }),
+              }),
+            }),
+          };
+        }
+        return {
+          select: vi.fn().mockReturnValue({
+            eq: vi.fn().mockReturnValue({
+              maybeSingle: vi.fn().mockResolvedValue({ data: null }),
+            }),
+          }),
+        };
+      }),
+    } as any);
+
+    const formData = new FormData();
+    formData.append("fullName", "Existing User");
+    formData.append("email", "existing@citizen.com");
+    formData.append("phone", "9876543210");
+    formData.append("password", "Password123!");
+
+    const res = await signUpCitizen(null, formData);
+    expect(res?.error).toBe(
+      "Already registered. An account with this email address is already registered. Please go to sign in."
+    );
+  });
 });
+

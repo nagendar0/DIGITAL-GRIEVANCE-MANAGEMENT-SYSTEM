@@ -6,6 +6,9 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { z } from "zod";
 import { isEmailVerifiedInDb } from "@/server/actions/otp";
 import { verifyEmailSignature } from "@/lib/email/otp-crypto";
+import { getExistingAuthUserByEmail } from "@/lib/auth/get-user";
+
+export { getExistingAuthUserByEmail };
 
 const signInSchema = z.object({
   email: z.string().email("Invalid email address"),
@@ -41,12 +44,6 @@ const registerOrgSchema = z.object({
   verificationDocUrl: z.string().optional().default("GOV-OFFICIAL-AFFILIATION-VERIFIED"),
 });
 
-export async function getExistingAuthUserByEmail(email: string) {
-  const cleanEmail = email.trim().toLowerCase();
-  const adminClient = createAdminClient();
-  const { data: userList } = await adminClient.auth.admin.listUsers();
-  return userList?.users?.find((u) => u.email?.toLowerCase() === cleanEmail) || null;
-}
 
 export type EmailDomainCheckResult = {
   email: string;
@@ -154,26 +151,14 @@ export async function checkEmailDomainStatus(
       };
     }
     // In SIGN_UP mode:
-    if (actualRole === "CITIZEN") {
-      return {
-        email: cleanEmail,
-        exists: true,
-        registeredInDomain: true,
-        actualRole,
-        domainName,
-        status: "ALREADY_REGISTERED",
-        message: "Already registered. An account with this email is already registered as a Citizen. Please log in.",
-      };
-    }
-    // Existing account from another role (worker/org) enrolling as citizen
     return {
       email: cleanEmail,
       exists: true,
-      registeredInDomain: false,
+      registeredInDomain: true,
       actualRole,
       domainName,
-      status: "AVAILABLE",
-      message: "Existing account found. You can enroll as a Citizen with this email.",
+      status: "ALREADY_REGISTERED",
+      message: "Already registered. An account with this email is already registered. Please go to sign in.",
     };
   }
 
@@ -525,60 +510,9 @@ export async function signUpCitizen(prevState: any, formData: FormData) {
   const supabase = await createClient();
 
   if (existingUser) {
-    // Check if user is already registered purely as Citizen
-    const { data: existingProfile } = await adminClient
-      .from("profiles")
-      .select("role")
-      .eq("id", existingUser.id)
-      .maybeSingle();
-
-    const { data: isWorker } = await adminClient
-      .from("workers")
-      .select("id")
-      .eq("user_id", existingUser.id)
-      .maybeSingle();
-
-    const { data: isOrg } = await adminClient
-      .from("organization_members")
-      .select("id")
-      .eq("user_id", existingUser.id)
-      .maybeSingle();
-
-    if (existingProfile?.role === "CITIZEN" && !isWorker && !isOrg) {
-      return {
-        error: "Already registered. An account with this email address is already registered as a Citizen. Please log in.",
-      };
-    }
-
-    // User is enrolling as Citizen (e.g. from Worker or Organization)
-    await adminClient.from("profiles").upsert({
-      id: existingUser.id,
-      full_name: validated.data.fullName,
-      phone: validated.data.phone || null,
-      role: "CITIZEN",
-      updated_at: new Date().toISOString(),
-    });
-
-    await adminClient.auth.admin.updateUserById(existingUser.id, {
-      password: validated.data.password,
-      user_metadata: {
-        ...existingUser.user_metadata,
-        full_name: validated.data.fullName,
-        phone: validated.data.phone || null,
-        role: "CITIZEN",
-      },
-    });
-
-    const { error: signInErr } = await supabase.auth.signInWithPassword({
-      email: cleanEmail,
-      password: validated.data.password,
-    });
-
-    if (signInErr) {
-      return { error: "Citizen enrollment succeeded, but sign in failed. Please log in." };
-    }
-
-    redirect("/citizen");
+    return {
+      error: "Already registered. An account with this email address is already registered. Please go to sign in.",
+    };
   }
 
   // 1. Create confirmed citizen auth account using admin client

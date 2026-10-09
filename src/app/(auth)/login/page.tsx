@@ -568,6 +568,13 @@ function AuthPortal() {
                 id="citizen-email"
                 label="Citizen Email Address (Verified via SMTP OTP)"
                 name="email"
+                value={email}
+                onEmailChange={handleEmailChange}
+                onSwitchToSignIn={(emailToUse) => {
+                  if (emailToUse) setEmail(emailToUse);
+                  handleModeChange("SIGN_IN");
+                }}
+                domainRole="CITIZEN"
                 placeholder="rahul@example.com"
                 roleContext="Citizen"
                 tokenInputName="citizenEmailVerificationToken"
@@ -689,6 +696,14 @@ function AuthPortal() {
                       id="org-admin-email"
                       label="Admin Login Email (Verified via SMTP OTP)"
                       name="adminEmail"
+                      value={email}
+                      onEmailChange={handleEmailChange}
+                      onSwitchToSignIn={(emailToUse) => {
+                        if (emailToUse) setEmail(emailToUse);
+                        handleRoleChange("ORGANIZATION");
+                        handleModeChange("SIGN_IN");
+                      }}
+                      domainRole="ORGANIZATION"
                       placeholder="ramesh@pwd.gov.in"
                       roleContext="Authority Admin"
                       tokenInputName="adminEmailVerificationToken"
@@ -928,6 +943,14 @@ function AuthPortal() {
                 id="worker-email"
                 label="Worker Email Address (Verified via SMTP OTP)"
                 name="email"
+                value={email}
+                onEmailChange={handleEmailChange}
+                onSwitchToSignIn={(emailToUse) => {
+                  if (emailToUse) setEmail(emailToUse);
+                  handleRoleChange("WORKER");
+                  handleModeChange("SIGN_IN");
+                }}
+                domainRole="WORKER"
                 placeholder="suresh.worker@civic.gov.in"
                 roleContext="Field Worker"
                 tokenInputName="workerEmailVerificationToken"

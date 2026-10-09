@@ -1,10 +1,11 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { Mail, CheckCircle2, AlertCircle, Loader2, KeyRound, RefreshCw } from "lucide-react";
+import { Mail, CheckCircle2, AlertCircle, Loader2, KeyRound, RefreshCw, ArrowRight } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { sendOtp, verifyOtp } from "@/server/actions/otp";
+import { checkEmailDomainStatus } from "@/server/actions/auth";
 import { cn } from "@/lib/utils";
 
 interface EmailOtpFieldProps {
@@ -17,6 +18,10 @@ interface EmailOtpFieldProps {
   accentColor?: "blue" | "orange" | "indigo";
   onVerifiedChange?: (verified: boolean, email: string) => void;
   required?: boolean;
+  value?: string;
+  onEmailChange?: (email: string) => void;
+  onSwitchToSignIn?: (email: string) => void;
+  domainRole?: "CITIZEN" | "ORGANIZATION" | "WORKER";
 }
 
 export function EmailOtpField({
@@ -29,8 +34,14 @@ export function EmailOtpField({
   accentColor = "blue",
   onVerifiedChange,
   required = true,
+  value,
+  onEmailChange,
+  onSwitchToSignIn,
+  domainRole = "CITIZEN",
 }: EmailOtpFieldProps) {
-  const [email, setEmail] = useState("");
+  const [internalEmail, setInternalEmail] = useState(value || "");
+  const email = value !== undefined ? value : internalEmail;
+
   const [otp, setOtp] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
@@ -40,6 +51,15 @@ export function EmailOtpField({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [resendCooldown, setResendCooldown] = useState(0);
+  const [registeredWarning, setRegisteredWarning] = useState<string | null>(null);
+  const [isCheckingRegistered, setIsCheckingRegistered] = useState(false);
+
+  // Sync internal state if value prop changes
+  useEffect(() => {
+    if (value !== undefined) {
+      setInternalEmail(value);
+    }
+  }, [value]);
 
   // Countdown timer for resend
   useEffect(() => {
@@ -50,10 +70,43 @@ export function EmailOtpField({
     return () => clearInterval(timer);
   }, [resendCooldown]);
 
+  // Live debounced check to see if email is already registered in the system
+  useEffect(() => {
+    const clean = email.trim().toLowerCase();
+    if (!clean || !clean.includes("@") || clean.length < 5) {
+      setRegisteredWarning(null);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      setIsCheckingRegistered(true);
+      try {
+        const res = await checkEmailDomainStatus(clean, domainRole, "SIGN_UP");
+        if (res.status === "ALREADY_REGISTERED") {
+          setRegisteredWarning(
+            res.message || "An account with this email is already registered. Please go to sign in."
+          );
+        } else {
+          setRegisteredWarning(null);
+        }
+      } catch {
+        // Silently ignore network check errors during typing
+      } finally {
+        setIsCheckingRegistered(false);
+      }
+    }, 400);
+
+    return () => clearTimeout(timer);
+  }, [email, domainRole]);
+
   const handleEmailChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newEmail = e.target.value;
-    setEmail(newEmail);
-    setErrorMsg(null); // Clear previous error immediately when user edits email
+    if (value === undefined) {
+      setInternalEmail(newEmail);
+    }
+    onEmailChange?.(newEmail);
+    setErrorMsg(null);
+    setRegisteredWarning(null);
     if (isVerified) {
       // Reset verification if user modifies email
       setIsVerified(false);
@@ -69,6 +122,11 @@ export function EmailOtpField({
     const cleanEmail = email.trim();
     if (!cleanEmail || !cleanEmail.includes("@")) {
       setErrorMsg("Please enter a valid email address first.");
+      return;
+    }
+
+    if (registeredWarning) {
+      setErrorMsg(registeredWarning);
       return;
     }
 
@@ -175,8 +233,10 @@ export function EmailOtpField({
               "flex h-11 w-full rounded-lg border bg-white px-3.5 py-2 text-sm text-slate-900 placeholder:text-slate-400 transition-colors",
               isVerified
                 ? "border-emerald-400 bg-emerald-50/20 text-emerald-950 font-medium cursor-not-allowed"
+                : registeredWarning
+                ? "border-amber-400 bg-amber-50/20 focus:outline-none focus:ring-2 focus:ring-amber-500"
                 : "border-slate-300 focus:outline-none focus:ring-2",
-              !isVerified && colorStyles.ring
+              !isVerified && !registeredWarning && colorStyles.ring
             )}
           />
         </div>
@@ -186,10 +246,17 @@ export function EmailOtpField({
             type="button"
             id={`${id}-send-otp-btn`}
             onClick={handleSendOtp}
-            disabled={isSending || !email.includes("@") || resendCooldown > 0}
+            disabled={
+              isSending ||
+              !email.includes("@") ||
+              resendCooldown > 0 ||
+              !!registeredWarning
+            }
             className={cn(
               "h-11 px-4 text-xs font-semibold shrink-0 cursor-pointer transition-all",
-              colorStyles.btn
+              registeredWarning
+                ? "bg-slate-300 hover:bg-slate-300 text-slate-500 cursor-not-allowed shadow-none"
+                : colorStyles.btn
             )}
           >
             {isSending ? (
@@ -223,6 +290,29 @@ export function EmailOtpField({
 
       {/* Hidden input carrying the cryptographically signed token */}
       <input type="hidden" name={tokenInputName} value={verifiedToken} />
+
+      {/* Live Warning when Email is Already Registered */}
+      {registeredWarning && !isVerified && (
+        <div
+          id={`${id}-already-registered-warning`}
+          className="p-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-900 text-xs space-y-2 animate-in fade-in"
+        >
+          <div className="flex items-start gap-2">
+            <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+            <span className="font-medium">{registeredWarning}</span>
+          </div>
+          <div className="pl-6 flex items-center gap-2">
+            <button
+              type="button"
+              id={`${id}-goto-signin-btn`}
+              onClick={() => onSwitchToSignIn?.(email)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs transition-colors cursor-pointer shadow-xs"
+            >
+              Go to Sign In <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* OTP Entry Section (Shown once code is sent and not yet verified) */}
       {otpSent && !isVerified && (
@@ -267,24 +357,25 @@ export function EmailOtpField({
 
       {/* Feedback Messages */}
       {errorMsg && (
-        <div className="p-2.5 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs flex flex-col gap-1.5">
-          <div className="flex items-center gap-2">
-            <AlertCircle className="w-3.5 h-3.5 shrink-0 text-red-600" />
+        <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs flex flex-col gap-2 animate-in fade-in">
+          <div className="flex items-start gap-2">
+            <AlertCircle className="w-4 h-4 shrink-0 text-red-600 mt-0.5" />
             <span>{errorMsg}</span>
           </div>
           {errorMsg.toLowerCase().includes("already registered") && (
-            <div className="pl-5 pt-0.5">
-              <a
-                href="/login?mode=signin"
-                className="inline-flex items-center gap-1 font-semibold text-blue-700 hover:underline cursor-pointer"
+            <div className="pl-6 pt-0.5">
+              <button
+                type="button"
+                onClick={() => onSwitchToSignIn?.(email)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs transition-colors cursor-pointer shadow-xs"
               >
-                Already registered? Please sign in here →
-              </a>
+                Go to Sign In <ArrowRight className="w-3.5 h-3.5" />
+              </button>
             </div>
           )}
         </div>
       )}
-      {successMsg && !errorMsg && (
+      {successMsg && !errorMsg && !registeredWarning && (
         <div className="p-2.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center gap-2">
           <CheckCircle2 className="w-3.5 h-3.5 shrink-0 text-emerald-600" />
           <span>{successMsg}</span>

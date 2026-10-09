@@ -111,3 +111,47 @@ export async function getCurrentUserWithRole(): Promise<AuthenticatedUser | null
     return null;
   }
 }
+
+/**
+ * Searches for an existing Supabase Auth user by email address (case-insensitive)
+ * Supports pagination to ensure no user accounts are missed.
+ */
+export async function getExistingAuthUserByEmail(email: string) {
+  const cleanEmail = (email || "").trim().toLowerCase();
+  if (!cleanEmail || !cleanEmail.includes("@")) return null;
+
+  try {
+    const adminClient = createAdminClient();
+    let page = 1;
+    const perPage = 1000;
+
+    while (true) {
+      const { data: userList, error } = await adminClient.auth.admin.listUsers({
+        page,
+        perPage,
+      });
+
+      if (error || !userList?.users || userList.users.length === 0) {
+        break;
+      }
+
+      const matched = userList.users.find(
+        (u) => u.email?.trim().toLowerCase() === cleanEmail
+      );
+      if (matched) {
+        return matched;
+      }
+
+      if (userList.users.length < perPage) {
+        break;
+      }
+      page++;
+    }
+
+    return null;
+  } catch (err) {
+    console.error("Error looking up auth user by email:", err);
+    return null;
+  }
+}
+

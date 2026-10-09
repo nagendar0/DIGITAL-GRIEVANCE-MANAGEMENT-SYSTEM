@@ -5,6 +5,7 @@ import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendOtpEmail } from "@/lib/email/mailer";
 import { signVerifiedEmail } from "@/lib/email/otp-crypto";
+import { getExistingAuthUserByEmail } from "@/lib/auth/get-user";
 
 const emailSchema = z.string().email("Invalid email address format");
 
@@ -49,37 +50,15 @@ export async function sendOtp(
 
     // Check if email is already registered specifically for this role before sending OTP
     if (roleContext === "Citizen") {
-      const { data: userList } = await admin.auth.admin.listUsers();
-      const existingUser = userList?.users?.find((u) => u.email?.toLowerCase() === cleanEmail);
+      const existingUser = await getExistingAuthUserByEmail(cleanEmail);
       if (existingUser) {
-        const { data: existingProfile } = await admin
-          .from("profiles")
-          .select("role")
-          .eq("id", existingUser.id)
-          .maybeSingle();
-
-        const { data: isWorker } = await admin
-          .from("workers")
-          .select("id")
-          .eq("user_id", existingUser.id)
-          .maybeSingle();
-
-        const { data: isOrg } = await admin
-          .from("organization_members")
-          .select("id")
-          .eq("user_id", existingUser.id)
-          .maybeSingle();
-
-        if (existingProfile?.role === "CITIZEN" && !isWorker && !isOrg) {
-          return {
-            success: false,
-            error: "Already registered. An account with this email is already registered as a Citizen. Please log in.",
-          };
-        }
+        return {
+          success: false,
+          error: "Already registered. An account with this email is already registered as a Citizen. Please log in.",
+        };
       }
     } else if (roleContext === "Authority Admin") {
-      const { data: userList } = await admin.auth.admin.listUsers();
-      const existingUser = userList?.users?.find((u) => u.email?.toLowerCase() === cleanEmail);
+      const existingUser = await getExistingAuthUserByEmail(cleanEmail);
       if (existingUser) {
         const { data: existingMember } = await admin
           .from("organization_members")
@@ -95,8 +74,7 @@ export async function sendOtp(
         }
       }
     } else if (roleContext === "Field Worker") {
-      const { data: userList } = await admin.auth.admin.listUsers();
-      const existingUser = userList?.users?.find((u) => u.email?.toLowerCase() === cleanEmail);
+      const existingUser = await getExistingAuthUserByEmail(cleanEmail);
       if (existingUser) {
         const { data: existingWorker } = await admin
           .from("workers")
