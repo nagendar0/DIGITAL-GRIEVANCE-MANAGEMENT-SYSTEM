@@ -154,9 +154,7 @@ export async function checkEmailDomainStatus(
           status: "DIFFERENT_ROLE",
           message: `This email is registered in the ${
             isWorker ? "Field Worker" : "Organization"
-          } table, not Citizen. Please switch to ${
-            isWorker ? "Field Worker" : "Organization"
-          } Sign In.`,
+          } table, not Citizen.`,
         };
       }
       return {
@@ -206,9 +204,7 @@ export async function checkEmailDomainStatus(
           status: "DIFFERENT_ROLE",
           message: `This email is registered in the ${
             isWorker ? "Field Worker" : "Citizen"
-          } table, not Organization. Please switch to ${
-            isWorker ? "Field Worker" : "Citizen"
-          } Sign In.`,
+          } table, not Organization.`,
         };
       }
       return {
@@ -260,9 +256,7 @@ export async function checkEmailDomainStatus(
         status: "DIFFERENT_ROLE",
         message: `This email is registered in the ${
           isOrgMember ? "Organization" : "Citizen"
-        } table, not Field Worker. Please switch to ${
-          isOrgMember ? "Organization" : "Citizen"
-        } Sign In.`,
+        } table, not Field Worker.`,
       };
     }
     return {

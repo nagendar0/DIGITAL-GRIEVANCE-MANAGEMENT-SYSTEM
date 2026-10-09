@@ -130,7 +130,7 @@ describe("checkEmailDomainStatus Category & Sector Enrollment Isolation", () => 
     expect(res.status).toBe("DIFFERENT_ROLE");
     expect(res.registeredInDomain).toBe(false);
     expect(res.actualRole).toBe("CITIZEN");
-    expect(res.message).toBe("This email is registered in the Citizen table, not Organization. Please switch to Citizen Sign In.");
+    expect(res.message).toBe("This email is registered in the Citizen table, not Organization.");
   });
 
   it("marks registered email on Organization portal Sign Up as ALREADY_REGISTERED", async () => {
@@ -211,7 +211,7 @@ describe("checkEmailDomainStatus Category & Sector Enrollment Isolation", () => 
     expect(res.status).toBe("DIFFERENT_ROLE");
     expect(res.registeredInDomain).toBe(false);
     expect(res.actualRole).toBe("CITIZEN");
-    expect(res.message).toBe("This email is registered in the Citizen table, not Field Worker. Please switch to Citizen Sign In.");
+    expect(res.message).toBe("This email is registered in the Citizen table, not Field Worker.");
   });
 
   it("detects registered Worker on Field Worker Sign In as ALREADY_REGISTERED", async () => {
@@ -357,7 +357,7 @@ describe("checkEmailDomainStatus Category & Sector Enrollment Isolation", () => 
     expect(res.status).toBe("DIFFERENT_ROLE");
     expect(res.registeredInDomain).toBe(false);
     expect(res.actualRole).toBe("WORKER");
-    expect(res.message).toBe("This email is registered in the Field Worker table, not Citizen. Please switch to Field Worker Sign In.");
+    expect(res.message).toBe("This email is registered in the Field Worker table, not Citizen.");
   });
 
   it("sendOtp blocks an existing registered user from receiving Field Worker registration OTP", async () => {

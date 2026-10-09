@@ -629,42 +629,6 @@ function AuthPortal() {
                         Create New {roleConfig.name} Account <ArrowRight className="w-3 h-3" />
                       </button>
                     )}
-                    {displayedSignInError.includes("Citizen portal") && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          handleRoleChange("CITIZEN");
-                          handleModeChange("SIGN_IN");
-                        }}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-blue-100 hover:bg-blue-200 text-blue-800 font-semibold text-[11px] transition-colors cursor-pointer"
-                      >
-                        Switch to Citizen Sign In <ArrowRight className="w-3 h-3" />
-                      </button>
-                    )}
-                    {displayedSignInError.includes("Organization portal") && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          handleRoleChange("ORGANIZATION");
-                          handleModeChange("SIGN_IN");
-                        }}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-orange-100 hover:bg-orange-200 text-orange-800 font-semibold text-[11px] transition-colors cursor-pointer"
-                      >
-                        Switch to Organization Sign In <ArrowRight className="w-3 h-3" />
-                      </button>
-                    )}
-                    {displayedSignInError.includes("Field Worker portal") && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          handleRoleChange("WORKER");
-                          handleModeChange("SIGN_IN");
-                        }}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-indigo-100 hover:bg-indigo-200 text-indigo-800 font-semibold text-[11px] transition-colors cursor-pointer"
-                      >
-                        Switch to Field Worker Sign In <ArrowRight className="w-3 h-3" />
-                      </button>
-                    )}
                   </div>
                 </div>
               )}
@@ -727,33 +691,6 @@ function AuthPortal() {
                           <AlertCircle className="w-3.5 h-3.5 text-orange-600 shrink-0" />
                           <span>{emailCheck.message}</span>
                         </div>
-                        {emailCheck.actualRole && (
-                          <button
-                            type="button"
-                            id="btn-switch-role-from-check"
-                            onClick={() => {
-                              const targetRole: RoleCategory =
-                                emailCheck.actualRole === "WORKER"
-                                  ? "WORKER"
-                                  : emailCheck.actualRole === "ORG_MEMBER" ||
-                                    emailCheck.actualRole === "PLATFORM_ADMIN"
-                                  ? "ORGANIZATION"
-                                  : "CITIZEN";
-                              handleRoleChange(targetRole);
-                              handleModeChange("SIGN_IN");
-                            }}
-                            className="inline-flex items-center gap-1 font-semibold text-orange-800 hover:underline pl-5 cursor-pointer text-[11px]"
-                          >
-                            Switch to{" "}
-                            {emailCheck.actualRole === "WORKER"
-                              ? "Field Worker"
-                              : emailCheck.actualRole === "ORG_MEMBER" ||
-                                emailCheck.actualRole === "PLATFORM_ADMIN"
-                              ? "Organization"
-                              : "Citizen"}{" "}
-                            Sign In →
-                          </button>
-                        )}
                       </div>
                     )}
                     {(emailCheck.status === "ALREADY_REGISTERED" ||
