@@ -128,7 +128,7 @@ describe("checkEmailDomainStatus Category & Sector Enrollment Isolation", () => 
     expect(res.message).toBe("Organization account found. Enter your password to sign in.");
   });
 
-  it("allows Citizen email to register an Organization on Sign Up", async () => {
+  it("marks registered email on Organization portal Sign Up as ALREADY_REGISTERED", async () => {
     const mockFrom = vi.fn((table: string) => {
       if (table === "organizations") {
         return {
@@ -163,8 +163,9 @@ describe("checkEmailDomainStatus Category & Sector Enrollment Isolation", () => 
     } as any);
 
     const res = await checkEmailDomainStatus("citizen@test.com", "ORGANIZATION", "SIGN_UP");
-    expect(res.status).toBe("AVAILABLE");
-    expect(res.message).toContain("You can register your Organization with this email");
+    expect(res.status).toBe("ALREADY_REGISTERED");
+    expect(res.message).toContain("Already registered");
+    expect(res.message).toContain("Please go to sign in");
   });
 
   it("detects registered Citizen email on Field Worker portal Sign In as ALREADY_REGISTERED for multi-role sign-in", async () => {
@@ -254,23 +255,8 @@ describe("checkEmailDomainStatus Category & Sector Enrollment Isolation", () => 
     expect(res.message).toBe("Field Worker account found. Enter your password to sign in.");
   });
 
-  it("sendOtp allows an existing Citizen to receive OTP for Field Worker onboarding", async () => {
+  it("sendOtp blocks an existing registered user from receiving Field Worker registration OTP", async () => {
     const { sendOtp } = await import("@/server/actions/otp");
-    const mockFrom = vi.fn((table: string) => {
-      if (table === "workers") {
-        return {
-          select: vi.fn().mockReturnValue({
-            eq: vi.fn().mockReturnValue({
-              maybeSingle: vi.fn().mockResolvedValue({ data: null }), // NOT a worker!
-            }),
-          }),
-        };
-      }
-      return {
-        upsert: vi.fn().mockResolvedValue({ error: null }),
-      };
-    });
-
     vi.mocked(createAdminClient).mockReturnValue({
       auth: {
         admin: {
@@ -283,13 +269,14 @@ describe("checkEmailDomainStatus Category & Sector Enrollment Isolation", () => 
           }),
         },
       },
-      from: mockFrom,
+      from: vi.fn().mockReturnValue({
+        upsert: vi.fn().mockResolvedValue({ error: null }),
+      }),
     } as any);
 
-    // Mock nodemailer transport sendMail
     const res = await sendOtp("citizen@test.com", "Field Worker");
-    expect(res.success).toBe(true);
-    expect(res.error).toBeUndefined();
+    expect(res.success).toBe(false);
+    expect(res.error).toContain("Already registered");
   });
 
   it("sendOtp blocks an existing registered Worker from receiving Field Worker registration OTP", async () => {
@@ -432,6 +419,111 @@ describe("checkEmailDomainStatus Category & Sector Enrollment Isolation", () => 
     formData.append("password", "Password123!");
 
     const res = await signUpCitizen(null, formData);
+    expect(res?.error).toBe(
+      "Already registered. An account with this email address is already registered. Please go to sign in."
+    );
+  });
+
+  it("registerOrganization blocks registration when admin email is already registered", async () => {
+    const { registerOrganization } = await import("@/server/actions/auth");
+    vi.mocked(createAdminClient).mockReturnValue({
+      auth: {
+        admin: {
+          listUsers: vi.fn().mockResolvedValue({
+            data: {
+              users: [
+                { id: "u-admin", email: "existing.admin@gov.in", user_metadata: { role: "ORG_MEMBER" } },
+              ],
+            },
+          }),
+        },
+      },
+      from: vi.fn((table: string) => {
+        if (table === "email_verifications") {
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                single: vi.fn().mockResolvedValue({
+                  data: { verified_at: new Date().toISOString() },
+                }),
+              }),
+            }),
+          };
+        }
+        return {
+          select: vi.fn().mockReturnValue({
+            eq: vi.fn().mockReturnValue({
+              maybeSingle: vi.fn().mockResolvedValue({ data: null }),
+            }),
+            ilike: vi.fn().mockReturnValue({
+              maybeSingle: vi.fn().mockResolvedValue({ data: null }),
+            }),
+          }),
+        };
+      }),
+    } as any);
+
+    const formData = new FormData();
+    formData.append("adminName", "Admin Test");
+    formData.append("adminEmail", "existing.admin@gov.in");
+    formData.append("adminPassword", "Password123!");
+    formData.append("adminPhone", "9876543210");
+    formData.append("orgName", "Public Works Dept");
+    formData.append("orgType", "PUBLIC_WORKS");
+    formData.append("registrationNumber", "PWD-2026-999");
+    formData.append("officialEmail", "dept@gov.in");
+    formData.append("officialPhone", "080-223344");
+    formData.append("address", "Civic Center Road");
+
+    const res = await registerOrganization(null, formData);
+    expect(res?.error).toBe(
+      "Already registered. An account with this email address is already registered. Please go to sign in."
+    );
+  });
+
+  it("signUpWorker blocks registration when worker email is already registered", async () => {
+    const { signUpWorker } = await import("@/server/actions/auth");
+    vi.mocked(createAdminClient).mockReturnValue({
+      auth: {
+        admin: {
+          listUsers: vi.fn().mockResolvedValue({
+            data: {
+              users: [
+                { id: "u-worker", email: "existing.worker@gov.in", user_metadata: { role: "WORKER" } },
+              ],
+            },
+          }),
+        },
+      },
+      from: vi.fn((table: string) => {
+        if (table === "email_verifications") {
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                single: vi.fn().mockResolvedValue({
+                  data: { verified_at: new Date().toISOString() },
+                }),
+              }),
+            }),
+          };
+        }
+        return {
+          select: vi.fn().mockReturnValue({
+            eq: vi.fn().mockReturnValue({
+              maybeSingle: vi.fn().mockResolvedValue({ data: null }),
+            }),
+          }),
+        };
+      }),
+    } as any);
+
+    const formData = new FormData();
+    formData.append("fullName", "Technician Test");
+    formData.append("email", "existing.worker@gov.in");
+    formData.append("phone", "9876543210");
+    formData.append("password", "Password123!");
+
+    const res = await signUpWorker(null, formData);
     expect(res?.error).toBe(
       "Already registered. An account with this email address is already registered. Please go to sign in."
     );

@@ -793,6 +793,11 @@ function AuthPortal() {
                       id="org-official-email"
                       label="Official Department Email (Verified via SMTP OTP)"
                       name="officialEmail"
+                      domainRole="ORGANIZATION"
+                      onSwitchToSignIn={() => {
+                        handleRoleChange("ORGANIZATION");
+                        handleModeChange("SIGN_IN");
+                      }}
                       placeholder="contact@pwd.gov.in"
                       roleContext="Department Official"
                       tokenInputName="officialEmailVerificationToken"

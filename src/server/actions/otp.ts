@@ -60,34 +60,18 @@ export async function sendOtp(
     } else if (roleContext === "Authority Admin") {
       const existingUser = await getExistingAuthUserByEmail(cleanEmail);
       if (existingUser) {
-        const { data: existingMember } = await admin
-          .from("organization_members")
-          .select("id")
-          .eq("user_id", existingUser.id)
-          .maybeSingle();
-
-        if (existingMember) {
-          return {
-            success: false,
-            error: "Already registered. An account with this email is already registered as an Organization. Please log in.",
-          };
-        }
+        return {
+          success: false,
+          error: "Already registered. An account with this email is already registered as an Organization. Please log in.",
+        };
       }
     } else if (roleContext === "Field Worker") {
       const existingUser = await getExistingAuthUserByEmail(cleanEmail);
       if (existingUser) {
-        const { data: existingWorker } = await admin
-          .from("workers")
-          .select("id")
-          .eq("user_id", existingUser.id)
-          .maybeSingle();
-
-        if (existingWorker) {
-          return {
-            success: false,
-            error: "Already registered. An account with this email is already registered as a Field Worker. Please log in.",
-          };
-        }
+        return {
+          success: false,
+          error: "Already registered. An account with this email is already registered as a Field Worker. Please log in.",
+        };
       }
     } else if (roleContext === "Department Official") {
       const { data: existingOrg } = await admin

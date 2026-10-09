@@ -174,26 +174,16 @@ export async function checkEmailDomainStatus(
         message: "Organization account found. Enter your password to sign in.",
       };
     }
-    if (actualRole === "ORG_MEMBER") {
-      return {
-        email: cleanEmail,
-        exists: true,
-        registeredInDomain: true,
-        actualRole,
-        domainName,
-        status: "ALREADY_REGISTERED",
-        message:
-          "Already registered. An account with this email is already enrolled in an Organization. Please log in.",
-      };
-    }
+    // In SIGN_UP mode:
     return {
       email: cleanEmail,
       exists: true,
-      registeredInDomain: false,
+      registeredInDomain: true,
       actualRole,
       domainName,
-      status: "AVAILABLE",
-      message: "You can register your Organization with this email.",
+      status: "ALREADY_REGISTERED",
+      message:
+        "Already registered. An account with this email is already registered. Please go to sign in.",
     };
   }
 
@@ -209,26 +199,16 @@ export async function checkEmailDomainStatus(
       message: "Field Worker account found. Enter your password to sign in.",
     };
   }
-  if (actualRole === "WORKER") {
-    return {
-      email: cleanEmail,
-      exists: true,
-      registeredInDomain: true,
-      actualRole,
-      domainName,
-      status: "ALREADY_REGISTERED",
-      message:
-        "Already registered. An account with this email is already registered as a Field Worker. Please log in.",
-    };
-  }
+  // In SIGN_UP mode:
   return {
     email: cleanEmail,
     exists: true,
-    registeredInDomain: false,
+    registeredInDomain: true,
     actualRole,
     domainName,
-    status: "AVAILABLE",
-    message: "You can register as a Field Worker with this email.",
+    status: "ALREADY_REGISTERED",
+    message:
+      "Already registered. An account with this email is already registered. Please go to sign in.",
   };
 }
 
@@ -617,52 +597,42 @@ export async function registerOrganization(prevState: any, formData: FormData) {
     };
   }
 
-  let adminAuthId: string;
+  // Check if organization official email already exists
+  const { data: existingOfficial } = await adminClient
+    .from("organizations")
+    .select("id")
+    .ilike("official_email", validated.data.officialEmail.trim())
+    .maybeSingle();
+
+  if (existingOfficial) {
+    return {
+      error: "Already registered. An organization with this official department email is already registered. Please go to sign in.",
+    };
+  }
 
   if (existingUser) {
-    const { data: existingMember } = await adminClient
-      .from("organization_members")
-      .select("id")
-      .eq("user_id", existingUser.id)
-      .maybeSingle();
-
-    if (existingMember) {
-      return {
-        error: "Already registered. An account with this email address is already registered as an Organization. Please log in.",
-      };
-    }
-
-    adminAuthId = existingUser.id;
-
-    // Update existing user credentials and metadata to ORG_MEMBER
-    await adminClient.auth.admin.updateUserById(adminAuthId, {
-      password: validated.data.adminPassword,
-      user_metadata: {
-        ...existingUser.user_metadata,
-        full_name: validated.data.adminName,
-        phone: validated.data.adminPhone,
-        role: "ORG_MEMBER",
-      },
-    });
-  } else {
-    // 1. Create confirmed organization admin user
-    const { data: newUser, error: createError } = await adminClient.auth.admin.createUser({
-      email: cleanAdminEmail,
-      password: validated.data.adminPassword,
-      email_confirm: true,
-      user_metadata: {
-        full_name: validated.data.adminName,
-        phone: validated.data.adminPhone,
-        role: "ORG_MEMBER",
-      },
-    });
-
-    if (createError || !newUser?.user) {
-      return { error: createError?.message || "Failed to create authority account." };
-    }
-
-    adminAuthId = newUser.user.id;
+    return {
+      error: "Already registered. An account with this email address is already registered. Please go to sign in.",
+    };
   }
+
+  // 1. Create confirmed organization admin user
+  const { data: newUser, error: createError } = await adminClient.auth.admin.createUser({
+    email: cleanAdminEmail,
+    password: validated.data.adminPassword,
+    email_confirm: true,
+    user_metadata: {
+      full_name: validated.data.adminName,
+      phone: validated.data.adminPhone,
+      role: "ORG_MEMBER",
+    },
+  });
+
+  if (createError || !newUser?.user) {
+    return { error: createError?.message || "Failed to create authority account." };
+  }
+
+  const adminAuthId = newUser.user.id;
 
   // 2. Insert profile as ORG_MEMBER
   await adminClient.from("profiles").upsert({
@@ -760,53 +730,29 @@ export async function signUpWorker(prevState: any, formData: FormData) {
   const adminClient = createAdminClient();
   const existingUser = await getExistingAuthUserByEmail(cleanEmail);
 
-  let workerAuthId: string;
-
   if (existingUser) {
-    const { data: existingWorker } = await adminClient
-      .from("workers")
-      .select("id")
-      .eq("user_id", existingUser.id)
-      .maybeSingle();
-
-    if (existingWorker) {
-      return {
-        error: "Already registered. An account with this email address is already registered as a Field Worker. Please log in.",
-      };
-    }
-
-    // User already exists in auth (e.g. as Citizen), now enrolling as a Field Worker
-    workerAuthId = existingUser.id;
-
-    // Update their password and user metadata
-    await adminClient.auth.admin.updateUserById(workerAuthId, {
-      password: validated.data.password,
-      user_metadata: {
-        ...existingUser.user_metadata,
-        full_name: validated.data.fullName,
-        phone: validated.data.phone,
-        role: "WORKER",
-      },
-    });
-  } else {
-    // 1. Create new auth user with role WORKER
-    const { data: newUser, error: createError } = await adminClient.auth.admin.createUser({
-      email: cleanEmail,
-      password: validated.data.password,
-      email_confirm: true,
-      user_metadata: {
-        full_name: validated.data.fullName,
-        phone: validated.data.phone,
-        role: "WORKER",
-      },
-    });
-
-    if (createError || !newUser?.user) {
-      return { error: createError?.message || "Failed to create worker account." };
-    }
-
-    workerAuthId = newUser.user.id;
+    return {
+      error: "Already registered. An account with this email address is already registered. Please go to sign in.",
+    };
   }
+
+  // 1. Create new auth user with role WORKER
+  const { data: newUser, error: createError } = await adminClient.auth.admin.createUser({
+    email: cleanEmail,
+    password: validated.data.password,
+    email_confirm: true,
+    user_metadata: {
+      full_name: validated.data.fullName,
+      phone: validated.data.phone,
+      role: "WORKER",
+    },
+  });
+
+  if (createError || !newUser?.user) {
+    return { error: createError?.message || "Failed to create worker account." };
+  }
+
+  const workerAuthId = newUser.user.id;
 
   const supabase = await createClient();
 
