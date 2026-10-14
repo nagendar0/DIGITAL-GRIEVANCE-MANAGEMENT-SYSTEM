@@ -99,199 +99,189 @@ export async function checkEmailDomainStatus(
     };
   }
 
-  // User exists: determine actual role
-  let actualRole: "CITIZEN" | "ORG_MEMBER" | "WORKER" | "PLATFORM_ADMIN" = "CITIZEN";
-
-  if (existingUser) {
-    const { data: worker } = await adminClient
-      .from("workers")
-      .select("id")
-      .eq("user_id", existingUser.id)
-      .maybeSingle();
-
-    const { data: member } = await adminClient
-      .from("organization_members")
-      .select("id")
-      .eq("user_id", existingUser.id)
-      .maybeSingle();
-
-    const { data: profile } = await adminClient
-      .from("profiles")
-      .select("role")
-      .eq("id", existingUser.id)
-      .maybeSingle();
-
-    if (
-      profile?.role === "PLATFORM_ADMIN" ||
-      existingUser.user_metadata?.role === "PLATFORM_ADMIN"
-    ) {
-      actualRole = "PLATFORM_ADMIN";
-    } else if (worker) {
-      actualRole = "WORKER";
-    } else if (member || orgWithOfficialEmail) {
-      actualRole = "ORG_MEMBER";
-    } else {
-      actualRole = "CITIZEN";
-    }
-  } else if (orgWithOfficialEmail) {
-    actualRole = "ORG_MEMBER";
-  }
-
-  const isWorker = actualRole === "WORKER";
-  const isOrgMember = actualRole === "ORG_MEMBER";
-  const isPlatformAdmin = actualRole === "PLATFORM_ADMIN";
-
+  // 1. CITIZEN DOMAIN: Only check Citizen table (profiles / auth user). Never block on worker table.
   if (domain === "CITIZEN") {
-    // Only check Citizen table (profiles with CITIZEN role, excluding dedicated worker or organization accounts)
-    if (isWorker || isOrgMember) {
+    if (existingUser) {
       if (mode === "SIGN_IN") {
         return {
           email: cleanEmail,
           exists: true,
-          registeredInDomain: false,
-          actualRole,
+          registeredInDomain: true,
+          actualRole: "CITIZEN",
           domainName,
-          status: "DIFFERENT_ROLE",
-          message: `This email is registered in the ${
-            isWorker ? "Field Worker" : "Organization"
-          } table, not Citizen.`,
+          status: "ALREADY_REGISTERED",
+          message: "Citizen account found. Enter your password to sign in.",
         };
       }
       return {
         email: cleanEmail,
         exists: true,
-        registeredInDomain: false,
-        actualRole,
+        registeredInDomain: true,
+        actualRole: "CITIZEN",
         domainName,
         status: "ALREADY_REGISTERED",
         message: "Already registered. An account with this email is already registered. Please go to sign in.",
       };
     }
 
-    if (mode === "SIGN_IN") {
-      return {
-        email: cleanEmail,
-        exists: true,
-        registeredInDomain: true,
-        actualRole,
-        domainName,
-        status: "ALREADY_REGISTERED",
-        message: "Citizen account found. Enter your password to sign in.",
-      };
-    }
-    // In SIGN_UP mode:
     return {
       email: cleanEmail,
-      exists: true,
-      registeredInDomain: true,
-      actualRole,
+      exists: false,
+      registeredInDomain: false,
       domainName,
-      status: "ALREADY_REGISTERED",
-      message: "Already registered. An account with this email is already registered. Please go to sign in.",
+      status: "NOT_REGISTERED",
+      message:
+        mode === "SIGN_IN"
+          ? "No Citizen account found with this email. Please register or create an account."
+          : "Email available for new Citizen registration.",
     };
   }
 
+  // 2. ORGANIZATION DOMAIN: Only check Organization tables (organizations and organization_members)
   if (domain === "ORGANIZATION") {
-    // Only check Organization tables (organizations and organization_members)
-    if (!isOrgMember && !isPlatformAdmin) {
+    let isOrg = Boolean(orgWithOfficialEmail);
+    if (existingUser && !isOrg) {
+      const { data: member } = await adminClient
+        .from("organization_members")
+        .select("id")
+        .eq("user_id", existingUser.id)
+        .maybeSingle();
+
+      const { data: profile } = await adminClient
+        .from("profiles")
+        .select("role")
+        .eq("id", existingUser.id)
+        .maybeSingle();
+
+      if (member || profile?.role === "PLATFORM_ADMIN" || existingUser.user_metadata?.role === "PLATFORM_ADMIN") {
+        isOrg = true;
+      }
+    }
+
+    if (isOrg) {
       if (mode === "SIGN_IN") {
         return {
           email: cleanEmail,
           exists: true,
-          registeredInDomain: false,
-          actualRole,
+          registeredInDomain: true,
+          actualRole: "ORG_MEMBER",
           domainName,
-          status: "DIFFERENT_ROLE",
-          message: `This email is registered in the ${
-            isWorker ? "Field Worker" : "Citizen"
-          } table, not Organization.`,
+          status: "ALREADY_REGISTERED",
+          message: "Organization account found in organization registry. Enter your password to sign in.",
         };
       }
       return {
         email: cleanEmail,
         exists: true,
-        registeredInDomain: false,
-        actualRole,
+        registeredInDomain: true,
+        actualRole: "ORG_MEMBER",
         domainName,
         status: "ALREADY_REGISTERED",
-        message:
-          "Already registered. An account with this email is already registered. Please go to sign in.",
+        message: "Already registered. An organization account with this email is already registered. Please go to sign in.",
       };
     }
 
-    if (mode === "SIGN_IN") {
+    // Not registered in organization table
+    if (existingUser && mode === "SIGN_UP") {
+      return {
+        email: cleanEmail,
+        exists: true,
+        registeredInDomain: false,
+        domainName,
+        status: "ALREADY_REGISTERED",
+        message: "Already registered. An account with this email is already registered. Please go to sign in.",
+      };
+    }
+
+    return {
+      email: cleanEmail,
+      exists: Boolean(existingUser),
+      registeredInDomain: false,
+      domainName,
+      status: "NOT_REGISTERED",
+      message:
+        mode === "SIGN_IN"
+          ? "No organization account found in the organization table for this email. Please register your organization first."
+          : "Email available for new Organization registration.",
+    };
+  }
+
+  // 3. WORKER DOMAIN: Only check Worker table (workers)
+  if (domain === "WORKER") {
+    let isWorkerUser = false;
+    if (existingUser) {
+      const { data: worker } = await adminClient
+        .from("workers")
+        .select("id")
+        .eq("user_id", existingUser.id)
+        .maybeSingle();
+
+      const { data: profile } = await adminClient
+        .from("profiles")
+        .select("role")
+        .eq("id", existingUser.id)
+        .maybeSingle();
+
+      if (worker || profile?.role === "PLATFORM_ADMIN" || existingUser.user_metadata?.role === "PLATFORM_ADMIN") {
+        isWorkerUser = true;
+      }
+    }
+
+    if (isWorkerUser) {
+      if (mode === "SIGN_IN") {
+        return {
+          email: cleanEmail,
+          exists: true,
+          registeredInDomain: true,
+          actualRole: "WORKER",
+          domainName,
+          status: "ALREADY_REGISTERED",
+          message: "Field Worker account found in worker registry. Enter your password to sign in.",
+        };
+      }
       return {
         email: cleanEmail,
         exists: true,
         registeredInDomain: true,
-        actualRole,
+        actualRole: "WORKER",
         domainName,
         status: "ALREADY_REGISTERED",
-        message: "Organization account found in organization registry. Enter your password to sign in.",
+        message: "Already registered. A field worker account with this email is already registered. Please go to sign in.",
       };
     }
-    // In SIGN_UP mode:
-    return {
-      email: cleanEmail,
-      exists: true,
-      registeredInDomain: true,
-      actualRole,
-      domainName,
-      status: "ALREADY_REGISTERED",
-      message:
-        "Already registered. An organization account with this email is already registered. Please go to sign in.",
-    };
-  }
 
-  // domain === "WORKER"
-  // Only check Worker table (workers)
-  if (!isWorker && !isPlatformAdmin) {
-    if (mode === "SIGN_IN") {
+    // Not registered in workers table
+    if (existingUser && mode === "SIGN_UP") {
       return {
         email: cleanEmail,
         exists: true,
         registeredInDomain: false,
-        actualRole,
         domainName,
-        status: "DIFFERENT_ROLE",
-        message: `This email is registered in the ${
-          isOrgMember ? "Organization" : "Citizen"
-        } table, not Field Worker.`,
+        status: "ALREADY_REGISTERED",
+        message: "Already registered. An account with this email is already registered. Please go to sign in.",
       };
     }
+
     return {
       email: cleanEmail,
-      exists: true,
+      exists: Boolean(existingUser),
       registeredInDomain: false,
-      actualRole,
       domainName,
-      status: "ALREADY_REGISTERED",
+      status: "NOT_REGISTERED",
       message:
-        "Already registered. An account with this email is already registered. Please go to sign in.",
+        mode === "SIGN_IN"
+          ? "No field technician account found in the workers table for this email. Please register as a field technician first."
+          : "Email available for new Field Worker registration.",
     };
   }
 
-  if (mode === "SIGN_IN") {
-    return {
-      email: cleanEmail,
-      exists: true,
-      registeredInDomain: true,
-      actualRole,
-      domainName,
-      status: "ALREADY_REGISTERED",
-      message: "Field Worker account found in worker registry. Enter your password to sign in.",
-    };
-  }
-  // In SIGN_UP mode:
   return {
     email: cleanEmail,
-    exists: true,
-    registeredInDomain: true,
-    actualRole,
+    exists: false,
+    registeredInDomain: false,
     domainName,
-    status: "ALREADY_REGISTERED",
-    message:
-      "Already registered. A field worker account with this email is already registered. Please go to sign in.",
+    status: "NOT_REGISTERED",
+    message: "Invalid domain requested.",
   };
 }
 
@@ -384,13 +374,8 @@ export async function signIn(prevState: any, formData: FormData) {
       // Check ONLY organization table: organization_members or organizations table
       if (!member && !orgWithOfficialEmail) {
         await supabase.auth.signOut();
-        if (worker) {
-          return {
-            error: "Access denied. This email is registered in the workers table. Please sign in via the Field Worker portal.",
-          };
-        }
         return {
-          error: "Access denied. No organization account found in the organization table for this email. Please register your organization first or sign in via the Citizen portal.",
+          error: "Access denied. No organization account found in the organization table for this email. Please register your organization first.",
         };
       }
 
@@ -413,13 +398,8 @@ export async function signIn(prevState: any, formData: FormData) {
       // Check ONLY worker table: workers table
       if (!worker) {
         await supabase.auth.signOut();
-        if (member || orgWithOfficialEmail) {
-          return {
-            error: "Access denied. This email is registered in the organization table. Please sign in via the Organization portal.",
-          };
-        }
         return {
-          error: "Access denied. No field technician account found in the workers table for this email. Please register as a field technician first or sign in via the Citizen portal.",
+          error: "Access denied. No field technician account found in the workers table for this email. Please register as a field technician first.",
         };
       }
 
@@ -427,23 +407,10 @@ export async function signIn(prevState: any, formData: FormData) {
     }
   } else {
     // Intended role is CITIZEN (or default)
+    // Only check citizen table (profiles / auth user). Never block on worker or organization tables!
     if (isPlatformAdmin) {
       role = "PLATFORM_ADMIN";
     } else {
-      // Check ONLY citizen table: block cross-domain worker or organization accounts
-      if (worker) {
-        await supabase.auth.signOut();
-        return {
-          error: "This email is registered in the workers table. Please sign in via the Field Worker portal.",
-        };
-      }
-      if (member || orgWithOfficialEmail) {
-        await supabase.auth.signOut();
-        return {
-          error: "This email is registered in the organization table. Please sign in via the Organization portal.",
-        };
-      }
-
       role = "CITIZEN";
       if (!profile) {
         await adminClient.from("profiles").insert({

@@ -337,34 +337,49 @@ function AuthPortal() {
   const [isOfficialEmailVerified, setIsOfficialEmailVerified] = useState(false);
   const [isWorkerEmailVerified, setIsWorkerEmailVerified] = useState(false);
 
-  // Dynamic Theme Colors and Metadata
+  // Dynamic Theme Colors, Logo Styling, and Metadata
   const roleConfig = {
     CITIZEN: {
       name: "Citizen",
+      portalTitle: "ResolveAI Citizen Portal",
       badge: "Public Resident",
       description: "Report civic issues, track live repairs, and verify resolution evidence.",
       icon: User,
+      logoIcon: Shield,
       color: "blue",
+      logoGradient: "from-blue-600 via-indigo-600 to-sky-500",
+      logoShadow: "shadow-blue-500/25",
+      badgeClass: "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/60 dark:text-blue-300 dark:border-blue-800",
       activeTabClass: "bg-white text-blue-600 shadow-sm border border-slate-200/80 ring-1 ring-blue-500/20",
       iconBgClass: "bg-blue-50 text-blue-600 border border-blue-100",
       btnClass: "bg-blue-600 hover:bg-blue-700 text-white shadow-sm",
     },
     ORGANIZATION: {
       name: "Organization",
-      badge: "Municipal & Utility",
+      portalTitle: "ResolveAI Organization Portal",
+      badge: "Municipal & Utility Authority",
       description: "Coordinate municipal operations, review grievances, and dispatch work orders.",
       icon: Building2,
+      logoIcon: Building2,
       color: "orange",
+      logoGradient: "from-amber-600 via-orange-600 to-rose-600",
+      logoShadow: "shadow-orange-500/25",
+      badgeClass: "bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-950/60 dark:text-orange-300 dark:border-orange-800",
       activeTabClass: "bg-white text-orange-600 shadow-sm border border-slate-200/80 ring-1 ring-orange-500/20",
       iconBgClass: "bg-orange-50 text-orange-600 border border-orange-100",
       btnClass: "bg-orange-600 hover:bg-orange-700 text-white shadow-sm",
     },
     WORKER: {
       name: "Field Worker",
+      portalTitle: "ResolveAI Field Operations",
       badge: "Service Technician",
       description: "Receive on-site work tasks, upload before/after photos, and complete GPS repairs.",
       icon: HardHat,
+      logoIcon: HardHat,
       color: "indigo",
+      logoGradient: "from-indigo-600 via-purple-600 to-cyan-600",
+      logoShadow: "shadow-indigo-500/25",
+      badgeClass: "bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-950/60 dark:text-indigo-300 dark:border-indigo-800",
       activeTabClass: "bg-white text-indigo-600 shadow-sm border border-slate-200/80 ring-1 ring-indigo-500/20",
       iconBgClass: "bg-indigo-50 text-indigo-600 border border-indigo-100",
       btnClass: "bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm",
@@ -372,10 +387,41 @@ function AuthPortal() {
   }[role];
 
   const CurrentIcon = roleConfig.icon;
+  const PortalLogoIcon = roleConfig.logoIcon;
   const isPending = isSignInPending || isCitizenPending || isOrgPending || isWorkerPending;
 
   return (
-    <div className="flex-1 flex items-center justify-center py-6 sm:py-10 px-3 sm:px-6 lg:px-8">
+    <div className="flex-1 flex flex-col items-center justify-center py-6 sm:py-10 px-3 sm:px-6 lg:px-8">
+      {/* Top Portal Branding with Dynamic Role Logo */}
+      <div className="w-full max-w-md mx-auto mb-5 text-center flex flex-col items-center">
+        <Link href="/" className="inline-flex items-center gap-3 group">
+          <div
+            className={cn(
+              "h-12 w-12 sm:h-13 sm:w-13 rounded-2xl flex items-center justify-center text-white shadow-lg transition-all duration-300 group-hover:scale-105 ring-1 ring-white/20",
+              `bg-gradient-to-tr ${roleConfig.logoGradient} ${roleConfig.logoShadow}`
+            )}
+          >
+            <PortalLogoIcon className="h-6 w-6 sm:h-7 sm:w-7" />
+          </div>
+          <div className="flex flex-col text-left">
+            <span className="font-bold text-2xl tracking-tight bg-gradient-to-r from-slate-900 via-blue-950 to-indigo-950 dark:from-white dark:via-blue-100 dark:to-indigo-200 bg-clip-text text-transparent">
+              ResolveAI
+            </span>
+            <div className="flex items-center gap-1.5 -mt-0.5">
+              <span
+                className={cn(
+                  "text-[10px] sm:text-[11px] font-semibold px-2 py-0.5 rounded-full border inline-flex items-center gap-1 transition-colors duration-200",
+                  roleConfig.badgeClass
+                )}
+              >
+                <CurrentIcon className="w-3 h-3" />
+                {roleConfig.name} Portal
+              </span>
+            </div>
+          </div>
+        </Link>
+      </div>
+
       <Card
         className={cn(
           "w-full border-slate-200/80 shadow-lg transition-all duration-300",
@@ -383,23 +429,50 @@ function AuthPortal() {
         )}
       >
         <CardHeader className="text-center space-y-3 pb-4">
-          {/* Header Icon */}
-          <div
-            className={cn(
-              "mx-auto w-12 h-12 sm:w-14 sm:h-14 rounded-2xl flex items-center justify-center transition-all duration-200",
-              mode === "FORGOT_PASSWORD"
-                ? "bg-amber-50 text-amber-600 border border-amber-100"
-                : roleConfig.iconBgClass
-            )}
-          >
-            {mode === "FORGOT_PASSWORD" ? (
-              <KeyRound className="w-6 h-6 sm:w-7 sm:h-7" />
-            ) : (
-              <CurrentIcon className="w-6 h-6 sm:w-7 sm:h-7" />
+          {/* Header Icon with Dynamic Role Emblem */}
+          <div className="relative mx-auto inline-block">
+            <div
+              className={cn(
+                "w-12 h-12 sm:w-14 sm:h-14 rounded-2xl flex items-center justify-center transition-all duration-200 shadow-md",
+                mode === "FORGOT_PASSWORD"
+                  ? "bg-amber-50 text-amber-600 border border-amber-200"
+                  : cn(`bg-gradient-to-tr ${roleConfig.logoGradient} text-white shadow-md`, roleConfig.logoShadow)
+              )}
+            >
+              {mode === "FORGOT_PASSWORD" ? (
+                <KeyRound className="w-6 h-6 sm:w-7 sm:h-7" />
+              ) : (
+                <PortalLogoIcon className="w-6 h-6 sm:w-7 sm:h-7" />
+              )}
+            </div>
+            {mode !== "FORGOT_PASSWORD" && (
+              <span
+                className={cn(
+                  "absolute -bottom-1 -right-1 w-5 h-5 rounded-full flex items-center justify-center text-white border-2 border-white dark:border-slate-900 shadow-xs",
+                  role === "CITIZEN"
+                    ? "bg-blue-600"
+                    : role === "ORGANIZATION"
+                    ? "bg-orange-600"
+                    : "bg-indigo-600"
+                )}
+                title={`${roleConfig.name} Portal`}
+              >
+                <CurrentIcon className="w-2.5 h-2.5" />
+              </span>
             )}
           </div>
 
           <div>
+            <div className="flex items-center justify-center gap-2 mb-1">
+              <span
+                className={cn(
+                  "text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border",
+                  roleConfig.badgeClass
+                )}
+              >
+                {roleConfig.badge}
+              </span>
+            </div>
             <CardTitle className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
               {mode === "FORGOT_PASSWORD"
                 ? "Reset Password"
